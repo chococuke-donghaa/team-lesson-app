@@ -10,35 +10,31 @@ import time
 from streamlit_gsheets import GSheetsConnection
 
 # -----------------------------------------------------------------------------
-# 1. 설정 및 데이터 관리
+# 1. 설정 및 기본 함수
 # -----------------------------------------------------------------------------
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
 CARD_BG_COLOR = "#0E1117"
 
-# [핵심] 모델 우선순위 리스트 설정
-# 첫 번째 모델 실패 시 다음 모델로 자동 넘어갑니다.
+# [핵심] 에러 시 자동으로 넘어갈 모델 순서 (사용자 쿼터 상황 반영)
 MODEL_PRIORITY_LIST = [
-    "gemini-2.5-flash",  # 1순위: 최신 2.0 Flash (속도 빠름) - *사용자 환경에 맞춰 이름 변경 가능
-    "gemini-2.5-flash-lite",      # 2순위: 1.5 Flash (안정적)
+    "gemini-2.5-flash",       # 1순위: 메인 모델
+    "gemini-2.5-flash-lite",  # 2순위: 쿼터 여유가 있는 Lite 모델
+    "gemini-1.5-flash"        # 3순위: 가장 안정적인 구형 모델
 ]
-# 참고: 스크린샷에 있는 'gemini-2.5-flash'가 실제 API 이름이라면 위 리스트를 수정해주세요.
-# 현재 공개된 표준 API 이름은 'gemini-2.0-flash-exp' 또는 'gemini-1.5-flash' 입니다.
 
-# [설정] AI가 참고할 카테고리 풀
 DEFAULT_CATEGORIES = [
     "기획", "디자인", "프론트엔드", "백엔드", "데이터/AI", 
     "인프라/DevOps", "QA/테스트", "마케팅", "비즈니스", 
     "협업/커뮤니케이션", "HR/조직문화", "프로세스", "기타"
 ]
 
-# [색상 팔레트]
 PURPLE_PALETTE = {
     50: "#EEEFFF", 100: "#DFE1FF", 200: "#C6C7FF", 300: "#A3A3FE",
     400: "#7E72FA", 500: "#7860F4", 600: "#6A43E8", 700: "#5B35CD",
     800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
 }
 
-# [필수 함수] 색상 계산 함수 (NameError 해결을 위해 상단에 배치)
+# [에러 해결] 함수 정의를 상단으로 이동
 def get_relative_color(val, max_val):
     if max_val == 0: return PURPLE_PALETTE[400]
     ratio = val / max_val
@@ -83,7 +79,7 @@ def save_data_to_sheet(df):
 def save_entry(writer, text, keywords, categories, date_val):
     df = load_data()
     
-    # 리스트 -> JSON 변환
+    # 카테고리 리스트 -> JSON 문자열 변환
     if isinstance(categories, list):
         cat_str = json.dumps(categories, ensure_ascii=False)
     else:
@@ -131,25 +127,25 @@ def parse_categories(cat_data):
         else: return [cat_data] if cat_data else ["기타"]
     except: return ["기타"]
 
-# --- [수정됨] AI 모델 자동 전환 로직 ---
+# -----------------------------------------------------------------------------
+# 2. AI 분석 (자동 모델 전환)
+# -----------------------------------------------------------------------------
 def analyze_text(text):
     genai.configure(api_key=GOOGLE_API_KEY)
-    
     last_error = None
     
-    # 모델 리스트를 순회하며 시도
+    # 모델 리스트를 순회하며 시도 (Fallback Logic)
     for model_name in MODEL_PRIORITY_LIST:
         try:
-            # 모델 초기화
             model = genai.GenerativeModel(model_name)
             
             prompt = f"""
             너는 IT 팀의 레슨런(Lesson Learned)을 분석하는 전문가야.
             입력된 텍스트를 읽고 아래 규칙에 맞춰 JSON 형식으로만 응답해.
 
-            1. keywords: 본문의 핵심 단어 2~3개를 리스트로 추출.
-            2. categories: 본문의 성격을 가장 잘 나타내는 카테고리를 리스트로 추출. (여러 개 가능)
-            - 참고 카테고리 풀: {', '.join(DEFAULT_CATEGORIES)}
+            1. keywords: 본문의 핵심 단어 2~3개를 리스트로 추출. (중요: 빈 칸 없이 구체적인 단어로)
+            2. categories: 본문의 성격을 가장 잘 나타내는 카테고리를 리스트로 추출.
+            - 추천 카테고리: {', '.join(DEFAULT_CATEGORIES)}
             - 내용이 복합적이라면 ["기획", "디자인"] 처럼 2개 이상 선택.
             
             [응답 예시]
@@ -161,7 +157,6 @@ def analyze_text(text):
             텍스트: {text}
             """
             
-            # API 호출
             response = model.generate_content(prompt)
             text_resp = response.text.replace("```json", "").replace("```", "").strip()
             result = json.loads(text_resp)
@@ -171,19 +166,15 @@ def analyze_text(text):
             
             if isinstance(cats, str): cats = [cats]
             
-            # 성공 시 성공한 모델명과 함께 리턴 (로그용)
-            print(f"Success with model: {model_name}")
+            print(f"✅ Success with {model_name}")
             return kws, cats, model_name
 
         except Exception as e:
-            # 실패 시 에러 로그 찍고 다음 모델로 넘어감
-            print(f"Model {model_name} failed: {e}")
+            print(f"⚠️ {model_name} failed: {e}")
             last_error = e
-            time.sleep(1) # 아주 짧은 대기
+            time.sleep(1) # 짧은 대기 후 다음 모델 시도
             continue
     
-    # 모든 모델 실패 시
-    st.error(f"모든 AI 모델 연결에 실패했습니다. (Error: {last_error})")
     return ["AI오류"], ["기타"], "None"
 
 def get_month_week_str(date_obj):
@@ -196,7 +187,7 @@ def get_month_week_str(date_obj):
         return ""
 
 # -----------------------------------------------------------------------------
-# 2. Streamlit UI 디자인
+# 3. Streamlit UI
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="Team Lesson Learned", layout="wide")
 
@@ -237,7 +228,7 @@ st.markdown(f"""
 col_head1, col_head2 = st.columns([5, 1])
 with col_head1:
     st.title("Team Lesson Learned 🚀")
-    st.caption(f"AI가 자동으로 카테고리와 키워드를 분류합니다. (Model Auto-Switching)")
+    st.caption("AI 자동 분류 및 모델 자동 전환(Auto-Switching) 지원")
 with col_head2:
     if GOOGLE_API_KEY != "YOUR_API_KEY":
         st.markdown(f'<div style="text-align: right;"><span class="ai-status-ok">🟢 AI Ready</span></div>', unsafe_allow_html=True)
@@ -246,6 +237,7 @@ with col_head2:
 
 tab1, tab2 = st.tabs(["📝 배움 기록하기", "📊 통합 대시보드"])
 
+# --- TAB 1: 입력 ---
 with tab1:
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
@@ -283,29 +275,28 @@ with tab1:
             if not writer or not text:
                 st.error("작성자와 내용을 모두 입력해주세요.")
             else:
-                with st.spinner("✨ AI 분석 중... (최적의 모델을 찾는 중)"):
-                    # 1. AI 분석 (Fallback 로직 포함)
+                with st.spinner("✨ AI 분석 및 저장 중..."):
                     ai_keywords, ai_cats, used_model = analyze_text(text)
                     
                     if used_model == "None":
-                         st.error("AI 분석에 실패하여 저장되지 않았습니다. 잠시 후 다시 시도해주세요.")
+                         st.error("모든 AI 모델 연결에 실패했습니다. (할당량 초과 등). 잠시 후 다시 시도해주세요.")
                     else:
-                        # 2. 저장/업데이트
                         if st.session_state['edit_mode']:
                             update_entry(
                                 st.session_state['edit_data']['id'], 
                                 writer, text, ai_keywords, ai_cats, selected_date
                             )
-                            st.success(f"✅ 수정 완료! (Used: {used_model})")
+                            st.success(f"✅ 수정 완료! (Model: {used_model})")
                             st.session_state['edit_mode'] = False
                             st.session_state['edit_data'] = {}
                             st.rerun()
                         else:
                             save_entry(writer, text, ai_keywords, ai_cats, selected_date)
-                            st.success(f"✅ 저장 완료! (분류: {', '.join(ai_cats)} / Used: {used_model})")
+                            st.success(f"✅ 저장 완료! (분류: {', '.join(ai_cats)} / Model: {used_model})")
 
     st.markdown("---")
     
+    # 리스트 뷰
     df = load_data()
     c_title, c_filter1, c_filter2 = st.columns([2, 1, 1], gap="small")
     with c_title: st.subheader("📜 이전 기록 참고하기")
@@ -358,6 +349,7 @@ with tab1:
     else:
         st.info("아직 기록된 내용이 없습니다.")
 
+# --- TAB 2: 대시보드 ---
 with tab2:
     df = load_data()
     if not df.empty:
@@ -393,24 +385,40 @@ with tab2:
                         
                         cats = parse_categories(row['category'])
                         for c in cats:
+                            # [문제 해결] 빈 키워드가 "빈 박스"를 만드는 원인!
+                            # 키워드가 비어있거나 공백이면 차트 데이터에 추가하지 않음
                             for k in kws: 
-                                tree_data.append({'Category': c, 'Keyword': k, 'Value': 1})
+                                if k and str(k).strip(): 
+                                    tree_data.append({'Category': c, 'Keyword': k, 'Value': 1})
                     
                     if tree_data:
                         tree_df = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
                         max_frequency = tree_df['Value'].max() if not tree_df.empty else 1
-                        labels, parents, values, colors, text_colors = [], [], [], [], []
                         
+                        labels, parents, values, colors, text_colors, ids = [], [], [], [], [], []
+                        
+                        # 부모 노드 (카테고리)
                         for cat in tree_df['Category'].unique():
                             cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
-                            labels.append(cat); parents.append(""); values.append(cat_total)
-                            colors.append(PURPLE_PALETTE[950]); text_colors.append("#FFFFFF")
+                            labels.append(cat)
+                            parents.append("")
+                            values.append(cat_total)
+                            ids.append(cat) # ID 추가
+                            colors.append(PURPLE_PALETTE[950])
+                            text_colors.append("#FFFFFF")
 
+                        # 자식 노드 (키워드)
                         for idx, row in tree_df.iterrows():
-                            labels.append(row['Keyword']); parents.append(row['Category']); values.append(row['Value'])
-                            colors.append(get_relative_color(row['Value'], max_frequency)); text_colors.append("#FFFFFF")
+                            labels.append(row['Keyword'])
+                            parents.append(row['Category'])
+                            values.append(row['Value'])
+                            ids.append(f"{row['Category']}-{row['Keyword']}") # 고유 ID 생성 (중복 방지)
+                            
+                            colors.append(get_relative_color(row['Value'], max_frequency))
+                            text_colors.append("#FFFFFF")
 
                         fig_tree = go.Figure(go.Treemap(
+                            ids=ids, # ID 매핑
                             labels=labels, parents=parents, values=values,
                             marker=dict(colors=colors, line=dict(width=2, color=CARD_BG_COLOR)),
                             textinfo="label+value",
@@ -419,13 +427,15 @@ with tab2:
                         ))
                         fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=500, paper_bgcolor=CARD_BG_COLOR)
                         st.plotly_chart(fig_tree, use_container_width=True)
+                    else:
+                        st.info("시각화할 유효한 키워드가 없습니다.")
                 else: st.info("데이터가 부족합니다.")
 
         st.markdown("---")
         
         col_chart1, col_chart2 = st.columns(2)
         with col_chart1:
-            st.subheader("📊 카테고리 분포 (중복 포함)")
+            st.subheader("📊 카테고리 분포")
             with st.container(border=True):
                 cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
                 cat_counts.columns = ['category', 'count']
