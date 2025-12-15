@@ -20,6 +20,7 @@ PURPLE_PALETTE = {
     800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
 }
 
+# [수정] Gap을 200 -> 600으로 늘림 (카드 간격 확장)
 CATEGORY_THEMES = {
     "기타": (400, 600), "기획": (500, 700), "개발": (600, 800),
     "디자인": (700, 900), "협업": (500, 700), "프로세스": (600, 800)
@@ -335,7 +336,6 @@ with tab2:
                     if tree_data:
                         tree_df = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
                         labels, parents, values, colors, text_colors, display_texts = [], [], [], [], [], []
-                        
                         categories = tree_df['Category'].unique()
                         for cat in categories:
                             cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
@@ -343,21 +343,23 @@ with tab2:
                             color_indices = CATEGORY_THEMES.get(cat, CATEGORY_THEMES["기타"])
                             colors.append(PURPLE_PALETTE[color_indices[0]])
                             text_colors.append(get_text_color(color_indices[0]))
-                            display_texts.append(f"{cat}") # HTML 제거
+                            display_texts.append(f"{cat}")
 
                         for idx, row in tree_df.iterrows():
                             labels.append(row['Keyword']); parents.append(row['Category']); values.append(row['Value'])
                             color_indices = CATEGORY_THEMES.get(row['Category'], CATEGORY_THEMES["기타"])
                             colors.append(PURPLE_PALETTE[color_indices[1]])
                             text_colors.append(get_text_color(color_indices[1]))
-                            display_texts.append(f"{row['Keyword']}") # HTML 제거
+                            display_texts.append(f"{row['Keyword']}")
 
                         fig_tree = go.Figure(go.Treemap(
                             labels=labels, parents=parents, values=values,
-                            marker=dict(colors=colors, line=dict(width=2, color=CARD_BG_COLOR)),
+                            
+                            # [수정] 테두리(Stroke) 제거: width=0
+                            marker=dict(colors=colors, line=dict(width=0, color=CARD_BG_COLOR)),
+                            
                             text=display_texts, 
                             textinfo="text",
-                            # [핵심] 폰트 크기 배열 로직 제거 -> 단순 고정 크기(20) 적용
                             textfont=dict(family="Pretendard", color=text_colors, size=20),
                             branchvalues="total", pathbar=dict(visible=False), textposition="middle center" 
                         ))
