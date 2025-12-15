@@ -284,17 +284,21 @@ with tab1:
                 except: kw_list = []
                 kw_str = "  ".join([f"#{k}" for k in kw_list])
                 
+                # 하단 뱃지
                 st.markdown(f"""<div style="margin-top: 20px; display: flex; align-items: center; gap: 10px;"><span style="background-color: {PURPLE_PALETTE[800]}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{row['category']}</span><span style="color: {PURPLE_PALETTE[400]}; font-size: 0.9rem;">{kw_str}</span></div>""", unsafe_allow_html=True)
                 st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
     else:
         st.info("아직 기록된 내용이 없습니다.")
 
-def get_color_by_value(val):
-    if val <= 1: return PURPLE_PALETTE[400]      
-    elif val == 2: return PURPLE_PALETTE[500]    
-    elif val <= 4: return PURPLE_PALETTE[700]    
-    else: return PURPLE_PALETTE[900]             
+# [NEW] 상대적 비율(Ratio) 기반 색상 계산 함수
+def get_relative_color(val, max_val):
+    if max_val == 0: return PURPLE_PALETTE[400]
+    ratio = val / max_val
+    if ratio >= 0.75: return PURPLE_PALETTE[900] # 상위 25% (가장 진함)
+    elif ratio >= 0.50: return PURPLE_PALETTE[700] # 상위 50% (진함)
+    elif ratio >= 0.25: return PURPLE_PALETTE[500] # 상위 75% (보통)
+    else: return PURPLE_PALETTE[400]             # 하위 25% (연함)
 
 with tab2:
     df = load_data()
@@ -327,8 +331,13 @@ with tab2:
                     
                     if tree_data:
                         tree_df = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
+                        
+                        # [핵심] 전체 데이터 중 최대 빈도수 계산 (상대평가 기준점)
+                        max_frequency = tree_df['Value'].max() if not tree_df.empty else 1
+                        
                         labels, parents, values, colors, text_colors, display_texts = [], [], [], [], [], []
                         
+                        # 카테고리 처리
                         categories = tree_df['Category'].unique()
                         for cat in categories:
                             cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
@@ -338,18 +347,21 @@ with tab2:
                             text_colors.append("#FFFFFF")
                             display_texts.append(f"{cat}")
 
+                        # 키워드 처리
                         for idx, row in tree_df.iterrows():
                             labels.append(row['Keyword']); parents.append(row['Category']); values.append(row['Value'])
                             
-                            color_hex = get_color_by_value(row['Value'])
+                            # [핵심] 상대적 비율로 색상 결정
+                            color_hex = get_relative_color(row['Value'], max_frequency)
                             colors.append(color_hex)
+                            
                             text_colors.append("#FFFFFF")
                             display_texts.append(f"{row['Keyword']}")
 
                         fig_tree = go.Figure(go.Treemap(
                             labels=labels, parents=parents, values=values,
                             
-                            # [핵심 수정] 테두리(Stroke) 색상을 950번으로 지정하여 줄눈 효과 구현
+                            # [핵심] 950번 색상(진한 남색)으로 카드 간격 프레임 생성
                             marker=dict(colors=colors, line=dict(width=8, color=PURPLE_PALETTE[950])),
                             
                             text=display_texts, 
