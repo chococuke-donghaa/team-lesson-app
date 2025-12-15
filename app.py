@@ -261,7 +261,7 @@ with tab1:
     
     df = load_data()
     c_title, c_filter1, c_filter2 = st.columns([2, 1, 1], gap="small")
-    with c_title: st.subheader("📜 Lesson Learn")
+    with c_title: st.subheader("📜 이전 기록 참고하기")
     
     if not df.empty:
         df['week_str'] = df['date'].apply(get_month_week_str)
@@ -323,8 +323,7 @@ with tab2:
             st.metric("최다 작성자", top_writer)
 
         with row1_col2:
-            # [변경] 지식 생태계 -> Keyword Map
-            st.subheader("🗺️ Keyword Map")
+            st.subheader("🗺️ Keyword Map (키워드 맵)")
             with st.container(border=True):
                 if all_kws:
                     tree_data = []
@@ -343,14 +342,16 @@ with tab2:
                             color_indices = CATEGORY_THEMES.get(cat, CATEGORY_THEMES["기타"])
                             colors.append(PURPLE_PALETTE[color_indices[0]])
                             text_colors.append(get_text_color(color_indices[0]))
-                            display_texts.append(f"<span style='font-size:20px; font-weight:700;'>{cat}</span>")
+                            # [수정] 카테고리(상위) 폰트 크기 증가 (20px -> 26px)
+                            display_texts.append(f"<span style='font-size:26px; font-weight:700;'>{cat}</span>")
 
                         for idx, row in tree_df.iterrows():
                             labels.append(row['Keyword']); parents.append(row['Category']); values.append(row['Value'])
                             color_indices = CATEGORY_THEMES.get(row['Category'], CATEGORY_THEMES["기타"])
                             colors.append(PURPLE_PALETTE[color_indices[1]])
                             text_colors.append(get_text_color(color_indices[1]))
-                            display_texts.append(f"<span style='font-size:20px; font-weight:700;'>{row['Keyword']}</span>")
+                            # [수정] 키워드(하위) 폰트 크기 축소 (20px -> 16px)
+                            display_texts.append(f"<span style='font-size:16px; font-weight:700;'>{row['Keyword']}</span>")
 
                         fig_tree = go.Figure(go.Treemap(
                             labels=labels, parents=parents, values=values,
