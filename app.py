@@ -284,7 +284,6 @@ with tab1:
                 except: kw_list = []
                 kw_str = "  ".join([f"#{k}" for k in kw_list])
                 
-                # 하단 뱃지
                 st.markdown(f"""<div style="margin-top: 20px; display: flex; align-items: center; gap: 10px;"><span style="background-color: {PURPLE_PALETTE[800]}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{row['category']}</span><span style="color: {PURPLE_PALETTE[400]}; font-size: 0.9rem;">{kw_str}</span></div>""", unsafe_allow_html=True)
                 st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
@@ -330,7 +329,6 @@ with tab2:
                         tree_df = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
                         labels, parents, values, colors, text_colors, display_texts = [], [], [], [], [], []
                         
-                        # 카테고리 처리
                         categories = tree_df['Category'].unique()
                         for cat in categories:
                             cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
@@ -340,7 +338,6 @@ with tab2:
                             text_colors.append("#FFFFFF")
                             display_texts.append(f"{cat}")
 
-                        # 키워드 처리
                         for idx, row in tree_df.iterrows():
                             labels.append(row['Keyword']); parents.append(row['Category']); values.append(row['Value'])
                             
@@ -352,8 +349,8 @@ with tab2:
                         fig_tree = go.Figure(go.Treemap(
                             labels=labels, parents=parents, values=values,
                             
-                            # [핵심 수정] width=8로 넓히고, 색상을 배경색(CARD_BG_COLOR)으로 지정하여 간격 효과 구현
-                            marker=dict(colors=colors, line=dict(width=8, color=CARD_BG_COLOR)),
+                            # [핵심 수정] 테두리(Stroke) 색상을 950번으로 지정하여 줄눈 효과 구현
+                            marker=dict(colors=colors, line=dict(width=8, color=PURPLE_PALETTE[950])),
                             
                             text=display_texts, 
                             textinfo="text",
