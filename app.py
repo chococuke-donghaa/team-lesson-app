@@ -14,12 +14,20 @@ from streamlit_gsheets import GSheetsConnection
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
 CARD_BG_COLOR = "#0E1117"
 
-# [색상 팔레트]
 PURPLE_PALETTE = {
     50: "#EEEFFF", 100: "#DFE1FF", 200: "#C6C7FF", 300: "#A3A3FE",
     400: "#7E72FA", 500: "#7860F4", 600: "#6A43E8", 700: "#5B35CD",
     800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
 }
+
+# [기존 테마] 여기에 없는 카테고리가 나오면 '기타'와 같은 색상을 씁니다.
+CATEGORY_THEMES = {
+    "기타": (400, 600), "기획": (500, 700), "개발": (600, 800),
+    "디자인": (700, 900), "협업": (500, 700), "프로세스": (600, 800)
+}
+
+def get_text_color(palette_index):
+    return "#FFFFFF"
 
 def get_connection():
     return st.connection("gsheets", type=GSheetsConnection)
@@ -99,6 +107,7 @@ def analyze_text(text):
         
         model = genai.GenerativeModel(model_name)
         
+        # [수정] 카테고리 제한 해제 프롬프트
         prompt = f"""
         너는 팀의 레슨런(Lesson Learned)을 분류하는 데이터 관리자야.
         입력된 텍스트를 분석해서 다음 규칙에 맞춰 JSON으로 응답해.
@@ -124,7 +133,12 @@ def analyze_text(text):
         response = model.generate_content(prompt)
         text_resp = response.text.replace("```json", "").replace("```", "").strip()
         result = json.loads(text_resp)
+        
         cat = result.get("category", "기타")
+        
+        # [삭제] 여기에 있던 'if cat not in CATEGORY_THEMES: cat = "기타"' 코드를 지웠습니다.
+        # 이제 AI가 뱉은 카테고리를 그대로 사용합니다.
+        
         return result.get("keywords", ["분석불가"]), cat
     except Exception as e:
         return ["AI연동실패"], "기타"
@@ -284,21 +298,11 @@ with tab1:
                 except: kw_list = []
                 kw_str = "  ".join([f"#{k}" for k in kw_list])
                 
-                # 하단 뱃지
                 st.markdown(f"""<div style="margin-top: 20px; display: flex; align-items: center; gap: 10px;"><span style="background-color: {PURPLE_PALETTE[800]}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{row['category']}</span><span style="color: {PURPLE_PALETTE[400]}; font-size: 0.9rem;">{kw_str}</span></div>""", unsafe_allow_html=True)
                 st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
     else:
         st.info("아직 기록된 내용이 없습니다.")
-
-# [NEW] 상대적 비율(Ratio) 기반 색상 계산 함수
-def get_relative_color(val, max_val):
-    if max_val == 0: return PURPLE_PALETTE[400]
-    ratio = val / max_val
-    if ratio >= 0.75: return PURPLE_PALETTE[900] # 상위 25% (가장 진함)
-    elif ratio >= 0.50: return PURPLE_PALETTE[700] # 상위 50% (진함)
-    elif ratio >= 0.25: return PURPLE_PALETTE[500] # 상위 75% (보통)
-    else: return PURPLE_PALETTE[400]             # 하위 25% (연함)
 
 with tab2:
     df = load_data()
@@ -331,39 +335,33 @@ with tab2:
                     
                     if tree_data:
                         tree_df = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
-                        
-                        # [핵심] 전체 데이터 중 최대 빈도수 계산 (상대평가 기준점)
-                        max_frequency = tree_df['Value'].max() if not tree_df.empty else 1
-                        
                         labels, parents, values, colors, text_colors, display_texts = [], [], [], [], [], []
                         
-                        # 카테고리 처리
                         categories = tree_df['Category'].unique()
                         for cat in categories:
                             cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
                             labels.append(cat); parents.append(""); values.append(cat_total)
                             
-                            colors.append(PURPLE_PALETTE[950])
-                            text_colors.append("#FFFFFF")
+                            # [핵심] 새로운 카테고리가 나오면 '기타' 색상을 기본값으로 사용 (에러 방지)
+                            color_indices = CATEGORY_THEMES.get(cat, CATEGORY_THEMES["기타"])
+                            
+                            colors.append(PURPLE_PALETTE[color_indices[0]])
+                            text_colors.append(get_text_color(color_indices[0]))
                             display_texts.append(f"{cat}")
 
-                        # 키워드 처리
                         for idx, row in tree_df.iterrows():
                             labels.append(row['Keyword']); parents.append(row['Category']); values.append(row['Value'])
                             
-                            # [핵심] 상대적 비율로 색상 결정
-                            color_hex = get_relative_color(row['Value'], max_frequency)
-                            colors.append(color_hex)
+                            # [핵심] 키워드도 마찬가지로 안전하게 색상 처리
+                            color_indices = CATEGORY_THEMES.get(row['Category'], CATEGORY_THEMES["기타"])
                             
-                            text_colors.append("#FFFFFF")
+                            colors.append(PURPLE_PALETTE[color_indices[1]])
+                            text_colors.append(get_text_color(color_indices[1]))
                             display_texts.append(f"{row['Keyword']}")
 
                         fig_tree = go.Figure(go.Treemap(
                             labels=labels, parents=parents, values=values,
-                            
-                            # [핵심] 950번 색상(진한 남색)으로 카드 간격 프레임 생성
-                            marker=dict(colors=colors, line=dict(width=8, color=PURPLE_PALETTE[950])),
-                            
+                            marker=dict(colors=colors, line=dict(width=0, color=CARD_BG_COLOR)),
                             text=display_texts, 
                             textinfo="text",
                             textfont=dict(family="Pretendard", color=text_colors, size=20),
