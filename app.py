@@ -343,28 +343,22 @@ with tab2:
                             color_indices = CATEGORY_THEMES.get(cat, CATEGORY_THEMES["기타"])
                             colors.append(PURPLE_PALETTE[color_indices[0]])
                             text_colors.append(get_text_color(color_indices[0]))
-                            
-                            # [핵심] 상위 카테고리: 폰트 크게 (24px)
-                            display_texts.append(f"<span style='font-size:24px; font-weight:bold;'>{cat}</span>")
+                            display_texts.append(f"{cat}") # HTML 제거
 
                         for idx, row in tree_df.iterrows():
                             labels.append(row['Keyword']); parents.append(row['Category']); values.append(row['Value'])
                             color_indices = CATEGORY_THEMES.get(row['Category'], CATEGORY_THEMES["기타"])
                             colors.append(PURPLE_PALETTE[color_indices[1]])
                             text_colors.append(get_text_color(color_indices[1]))
-                            
-                            # [핵심] 하위 키워드: 폰트 작게 (16px)
-                            display_texts.append(f"<span style='font-size:16px;'>{row['Keyword']}</span>")
+                            display_texts.append(f"{row['Keyword']}") # HTML 제거
 
                         fig_tree = go.Figure(go.Treemap(
                             labels=labels, parents=parents, values=values,
                             marker=dict(colors=colors, line=dict(width=2, color=CARD_BG_COLOR)),
                             text=display_texts, 
-                            
-                            # [중요] textinfo='text'로 설정해야 HTML 태그가 먹힙니다!
                             textinfo="text",
-                            
-                            textfont=dict(family="Pretendard", color=text_colors),
+                            # [핵심] 폰트 크기 배열 로직 제거 -> 단순 고정 크기(20) 적용
+                            textfont=dict(family="Pretendard", color=text_colors, size=20),
                             branchvalues="total", pathbar=dict(visible=False), textposition="middle center" 
                         ))
                         fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=520, paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
