@@ -27,7 +27,7 @@ def get_connection():
 def load_data(force_reload=False):
     conn = get_connection()
     try:
-        # [중요] 'Quota exceeded' 에러 방지를 위해 10분 캐싱 적용 (디자인은 유지하되 기능만 보강)
+        # [중요] 'Quota exceeded' 에러 방지를 위해 10분 캐싱 적용
         ttl_val = 0 if force_reload else "10m"
         df = conn.read(ttl=ttl_val)
         
@@ -61,7 +61,6 @@ def save_data_to_sheet(df):
 
 def save_entry(writer, text, keywords, category, date_val):
     df = load_data(force_reload=True)
-    # 카테고리/키워드 저장 시 리스트/문자열 처리 호환성 유지
     if isinstance(category, list): cat_str = json.dumps(category, ensure_ascii=False)
     else: cat_str = json.dumps([str(category)], ensure_ascii=False)
     
@@ -96,7 +95,6 @@ def delete_entry(entry_id):
     df = df[df['id'] != entry_id]
     save_data_to_sheet(df)
 
-# [헬퍼] 데이터 파싱 (리스트/문자열 호환)
 def parse_json_list(data_str):
     try:
         if not data_str or pd.isna(data_str): return []
@@ -147,7 +145,7 @@ def get_month_week_str(date_obj):
     except: return ""
 
 # -----------------------------------------------------------------------------
-# 2. UI 디자인 (요청하신 디자인 코드 복원)
+# 2. UI 디자인
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="Team Lesson Learned", layout="wide")
 
@@ -208,14 +206,15 @@ with tab1:
         form_writer = st.session_state['edit_data'].get('writer', '')
         form_text = st.session_state['edit_data'].get('text', '')
         d_val = st.session_state['edit_data'].get('date')
-        init_date = d_val.date() if isinstance(d_val, pd.Timestamp) else datetime.datetime.now().date()
+        form_date = d_val.date() if isinstance(d_val, pd.Timestamp) else datetime.datetime.now().date()
     else:
-        init_writer = ""; init_text = ""; init_date = datetime.datetime.now().date()
+        # [수정됨] 변수명을 form_* 으로 통일하여 오류 해결
+        form_writer = ""; form_text = ""; form_date = datetime.datetime.now().date()
 
     with st.form("record_form", clear_on_submit=True):
         c_input1, c_input2 = st.columns([1, 1])
         with c_input1: writer = st.text_input("작성자", value=form_writer)
-        with c_input2: selected_date = st.date_input("날짜", value=init_date)
+        with c_input2: selected_date = st.date_input("날짜", value=form_date)
         text = st.text_area("내용 (Markdown 지원)", value=form_text, height=150)
         submitted = st.form_submit_button("수정 완료" if st.session_state['edit_mode'] else "기록 저장하기", use_container_width=True)
         
@@ -274,7 +273,6 @@ with tab1:
                 st.markdown("<div style='height:15px;'></div>", unsafe_allow_html=True)
     else: st.info("아직 기록된 내용이 없습니다.")
 
-# [디자인 복구] 요청하신 상대적 비율 색상 로직
 def get_relative_color(val, max_val):
     if max_val == 0: return PURPLE_PALETTE[400]
     ratio = val / max_val
@@ -320,8 +318,6 @@ with tab2:
                     
                     ids, labels, parents, values, colors, display_texts = [], [], [], [], [], []
                     
-                    # [디자인+기능 통합] ID는 충돌 방지용으로 생성하되, 색상과 디자인은 요청하신 코드 적용
-                    # 1. 카테고리 (부모)
                     categories = tree_df['Category'].unique()
                     for cat in categories:
                         cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
@@ -329,22 +325,19 @@ with tab2:
                         labels.append(cat)
                         parents.append("")
                         values.append(cat_total)
-                        colors.append(PURPLE_PALETTE[950]) # 요청하신 진한 배경색
+                        colors.append(PURPLE_PALETTE[950])
                         display_texts.append(cat)
 
-                    # 2. 키워드 (자식)
                     for idx, row in tree_df.iterrows():
                         ids.append(f"KW-{row['Category']}-{row['Keyword']}")
                         labels.append(row['Keyword'])
                         parents.append(f"CAT-{row['Category']}")
                         values.append(row['Value'])
-                        # 요청하신 상대적 비율 색상 적용
                         colors.append(get_relative_color(row['Value'], max_frequency))
                         display_texts.append(row['Keyword'])
 
                     fig_tree = go.Figure(go.Treemap(
                         ids=ids, labels=labels, parents=parents, values=values,
-                        # [디자인 핵심] 굵은 테두리와 색상 팔레트 적용
                         marker=dict(colors=colors, line=dict(width=8, color=PURPLE_PALETTE[950])),
                         text=display_texts, textinfo="text",
                         textfont=dict(family="Pretendard", color="white", size=20),
