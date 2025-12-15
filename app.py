@@ -373,7 +373,7 @@ with tab2:
             st.metric("최다 작성자", top_writer)
 
         with row1_col2:
-            st.subheader("🗺️ Category Map (배움의 영역)")
+            st.subheader("🗺️ Category Map")
             with st.container(border=True):
                 if all_cats_flat:
                     # [수정됨] 키워드를 제거하고 카테고리만 카운트하여 단순화
