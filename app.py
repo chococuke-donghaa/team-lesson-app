@@ -15,11 +15,11 @@ from streamlit_gsheets import GSheetsConnection
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
 CARD_BG_COLOR = "#0E1117"
 
-# [핵심] 에러 시 자동으로 넘어갈 모델 순서 (사용자 쿼터 상황 반영)
+# [수정됨] 실제 사용 가능한 모델로 리스트 재구성 (쿼터 초과 시 다음 모델로 자동 전환)
 MODEL_PRIORITY_LIST = [
     "gemini-2.5-flash",       # 1순위: 메인 모델
-    "gemini-2.5-flash-lite",  # 2순위: 쿼터 여유가 있는 Lite 모델
-    "gemini-1.5-flash"        # 3순위: 가장 안정적인 구형 모델
+    "gemini-2.5-flash-lite",  # 2순위: 쿼터 여유 모델
+    "gemini-1.5-flash"        # 3순위: 안정적인 구형 모델
 ]
 
 DEFAULT_CATEGORIES = [
@@ -34,13 +34,14 @@ PURPLE_PALETTE = {
     800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
 }
 
-# [에러 해결] 함수 정의를 상단으로 이동
+# [에러 해결] NameError 방지를 위해 최상단에 정의
 def get_relative_color(val, max_val):
     if max_val == 0: return PURPLE_PALETTE[400]
     ratio = val / max_val
-    if ratio >= 0.75: return PURPLE_PALETTE[900]
-    elif ratio >= 0.50: return PURPLE_PALETTE[700]
-    elif ratio >= 0.25: return PURPLE_PALETTE[500]
+    if ratio >= 0.8: return PURPLE_PALETTE[900]
+    elif ratio >= 0.6: return PURPLE_PALETTE[800]
+    elif ratio >= 0.4: return PURPLE_PALETTE[600]
+    elif ratio >= 0.2: return PURPLE_PALETTE[500]
     else: return PURPLE_PALETTE[400]
 
 def get_connection():
@@ -79,7 +80,6 @@ def save_data_to_sheet(df):
 def save_entry(writer, text, keywords, categories, date_val):
     df = load_data()
     
-    # 카테고리 리스트 -> JSON 문자열 변환
     if isinstance(categories, list):
         cat_str = json.dumps(categories, ensure_ascii=False)
     else:
@@ -132,9 +132,8 @@ def parse_categories(cat_data):
 # -----------------------------------------------------------------------------
 def analyze_text(text):
     genai.configure(api_key=GOOGLE_API_KEY)
-    last_error = None
     
-    # 모델 리스트를 순회하며 시도 (Fallback Logic)
+    # 모델 리스트 순회 (Fallback Logic)
     for model_name in MODEL_PRIORITY_LIST:
         try:
             model = genai.GenerativeModel(model_name)
@@ -143,14 +142,14 @@ def analyze_text(text):
             너는 IT 팀의 레슨런(Lesson Learned)을 분석하는 전문가야.
             입력된 텍스트를 읽고 아래 규칙에 맞춰 JSON 형식으로만 응답해.
 
-            1. keywords: 본문의 핵심 단어 2~3개를 리스트로 추출. (중요: 빈 칸 없이 구체적인 단어로)
-            2. categories: 본문의 성격을 가장 잘 나타내는 카테고리를 리스트로 추출.
+            1. keywords: 본문의 핵심 해시태그 2~3개 추출. (예: ["#배포자동화", "#커뮤니케이션"])
+            2. categories: 본문의 성격을 나타내는 카테고리 추출.
             - 추천 카테고리: {', '.join(DEFAULT_CATEGORIES)}
             - 내용이 복합적이라면 ["기획", "디자인"] 처럼 2개 이상 선택.
             
             [응답 예시]
             {{
-                "keywords": ["API최적화", "응답속도"],
+                "keywords": ["#API최적화", "#응답속도"],
                 "categories": ["백엔드", "성능개선"]
             }}
             
@@ -161,7 +160,7 @@ def analyze_text(text):
             text_resp = response.text.replace("```json", "").replace("```", "").strip()
             result = json.loads(text_resp)
             
-            kws = result.get("keywords", ["분석불가"])
+            kws = result.get("keywords", ["#분석불가"])
             cats = result.get("categories", ["기타"])
             
             if isinstance(cats, str): cats = [cats]
@@ -171,11 +170,10 @@ def analyze_text(text):
 
         except Exception as e:
             print(f"⚠️ {model_name} failed: {e}")
-            last_error = e
             time.sleep(1) # 짧은 대기 후 다음 모델 시도
             continue
     
-    return ["AI오류"], ["기타"], "None"
+    return ["#AI오류"], ["기타"], "None"
 
 def get_month_week_str(date_obj):
     try:
@@ -375,68 +373,44 @@ with tab2:
             st.metric("최다 작성자", top_writer)
 
         with row1_col2:
-            st.subheader("🗺️ Keyword Map (주제별 키워드)")
+            st.subheader("🗺️ Category Map (배움의 영역)")
             with st.container(border=True):
-                if all_kws:
-                    tree_data = []
-                    for idx, row in df.iterrows():
-                        try: kws = json.loads(row['keywords'])
-                        except: kws = []
-                        
-                        cats = parse_categories(row['category'])
-                        for c in cats:
-                            # [문제 해결] 빈 키워드가 "빈 박스"를 만드는 원인!
-                            # 키워드가 비어있거나 공백이면 차트 데이터에 추가하지 않음
-                            for k in kws: 
-                                if k and str(k).strip(): 
-                                    tree_data.append({'Category': c, 'Keyword': k, 'Value': 1})
+                if all_cats_flat:
+                    # [수정됨] 키워드를 제거하고 카테고리만 카운트하여 단순화
+                    cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
+                    cat_counts.columns = ['Category', 'Value']
                     
-                    if tree_data:
-                        tree_df = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
-                        max_frequency = tree_df['Value'].max() if not tree_df.empty else 1
+                    if not cat_counts.empty:
+                        max_frequency = cat_counts['Value'].max()
                         
-                        labels, parents, values, colors, text_colors, ids = [], [], [], [], [], []
+                        labels = cat_counts['Category'].tolist()
+                        parents = [""] * len(labels) # 부모 노드 없음 (1단계 평면)
+                        values = cat_counts['Value'].tolist()
                         
-                        # 부모 노드 (카테고리)
-                        for cat in tree_df['Category'].unique():
-                            cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
-                            labels.append(cat)
-                            parents.append("")
-                            values.append(cat_total)
-                            ids.append(cat) # ID 추가
-                            colors.append(PURPLE_PALETTE[950])
-                            text_colors.append("#FFFFFF")
-
-                        # 자식 노드 (키워드)
-                        for idx, row in tree_df.iterrows():
-                            labels.append(row['Keyword'])
-                            parents.append(row['Category'])
-                            values.append(row['Value'])
-                            ids.append(f"{row['Category']}-{row['Keyword']}") # 고유 ID 생성 (중복 방지)
-                            
-                            colors.append(get_relative_color(row['Value'], max_frequency))
-                            text_colors.append("#FFFFFF")
+                        # 색상 매핑 (많을수록 진하게)
+                        colors = [get_relative_color(v, max_frequency) for v in values]
+                        text_colors = ["#FFFFFF"] * len(labels)
 
                         fig_tree = go.Figure(go.Treemap(
-                            ids=ids, # ID 매핑
                             labels=labels, parents=parents, values=values,
                             marker=dict(colors=colors, line=dict(width=2, color=CARD_BG_COLOR)),
                             textinfo="label+value",
-                            textfont=dict(family="Pretendard", color=text_colors, size=16),
+                            textfont=dict(family="Pretendard", color=text_colors, size=20),
                             branchvalues="total"
                         ))
                         fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=500, paper_bgcolor=CARD_BG_COLOR)
                         st.plotly_chart(fig_tree, use_container_width=True)
                     else:
-                        st.info("시각화할 유효한 키워드가 없습니다.")
+                        st.info("시각화할 카테고리 데이터가 없습니다.")
                 else: st.info("데이터가 부족합니다.")
 
         st.markdown("---")
         
         col_chart1, col_chart2 = st.columns(2)
         with col_chart1:
-            st.subheader("📊 카테고리 분포")
+            st.subheader("📊 카테고리 비중")
             with st.container(border=True):
+                # 파이 차트는 비율을 보기 좋음
                 cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
                 cat_counts.columns = ['category', 'count']
                 
@@ -446,8 +420,9 @@ with tab2:
                 st.plotly_chart(fig_pie, use_container_width=True)
                 
         with col_chart2:
-            st.subheader("🏆 Top 키워드")
+            st.subheader("🏆 Top 키워드 (해시태그)")
             with st.container(border=True):
+                # 키워드는 여기서만 바 차트로 보여주기
                 if all_kws:
                     kw_counts = pd.Series(all_kws).value_counts().head(10).reset_index()
                     kw_counts.columns = ['keyword', 'count']
