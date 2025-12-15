@@ -31,33 +31,25 @@ def get_text_color(palette_index):
 def get_connection():
     return st.connection("gsheets", type=GSheetsConnection)
 
-# [수정] 데이터 로드 함수를 '잘 되던 방식'으로 복구 + 에러 시 원인 출력
 def load_data():
     conn = get_connection()
     try:
-        # 캐시 없이 항상 최신 데이터 읽기
         df = conn.read(ttl=0)
-        
-        # 데이터가 비었거나 필수 컬럼이 없으면 빈 값 반환
         if df.empty:
             return pd.DataFrame(columns=["id", "date", "writer", "text", "keywords", "category"])
-            
-        # 컬럼 이름 공백 제거 및 소문자 변환 (오류 방지)
+        
         df.columns = [c.strip().lower() for c in df.columns]
         
-        # 필수 컬럼이 없는 경우 체크
         if 'id' not in df.columns:
             st.error("❌ 구글 시트에 'id' 컬럼이 없습니다. 1행 제목을 확인해주세요.")
             return pd.DataFrame(columns=["id", "date", "writer", "text", "keywords", "category"])
 
-        # 날짜 변환 (에러 나도 멈추지 않게 coerce 설정)
         if 'date' in df.columns:
             df['date'] = pd.to_datetime(df['date'], errors='coerce')
         
         df = df.fillna("")
         return df
     except Exception as e:
-        # [중요] 에러가 나면 숨기지 않고 화면에 보여줌 (원인 파악용)
         st.error(f"데이터를 불러오는 중 문제가 발생했습니다: {e}")
         return pd.DataFrame(columns=["id", "date", "writer", "text", "keywords", "category"])
 
@@ -68,11 +60,11 @@ def save_data_to_sheet(df):
         save_df['date'] = save_df['date'].dt.strftime('%Y-%m-%d')
     conn.update(data=save_df)
 
-def save_entry(writer, text, keywords, category):
+def save_entry(writer, text, keywords, category, date_val):
     df = load_data()
     new_data = pd.DataFrame({
         "id": [str(uuid.uuid4())],
-        "date": [datetime.datetime.now()],
+        "date": [pd.to_datetime(date_val)],
         "writer": [writer],
         "text": [text],
         "keywords": [json.dumps(keywords, ensure_ascii=False)],
@@ -81,7 +73,7 @@ def save_entry(writer, text, keywords, category):
     df = pd.concat([df, new_data], ignore_index=True)
     save_data_to_sheet(df)
 
-def update_entry(entry_id, writer, text, keywords, category):
+def update_entry(entry_id, writer, text, keywords, category, date_val):
     df = load_data()
     idx = df[df['id'] == entry_id].index
     if not idx.empty:
@@ -89,6 +81,7 @@ def update_entry(entry_id, writer, text, keywords, category):
         df.at[idx[0], 'text'] = text
         df.at[idx[0], 'keywords'] = json.dumps(keywords, ensure_ascii=False)
         df.at[idx[0], 'category'] = category
+        df.at[idx[0], 'date'] = pd.to_datetime(date_val)
         save_data_to_sheet(df)
 
 def delete_entry(entry_id):
@@ -106,7 +99,6 @@ def get_available_model():
     except:
         return None
 
-# [핵심] 키워드 표준화 적용된 분석 함수 (이 부분만 변경됨)
 def analyze_text(text):
     try:
         model_name = get_available_model()
@@ -227,13 +219,25 @@ with tab1:
             st.rerun()
         form_writer = st.session_state['edit_data'].get('writer', '')
         form_text = st.session_state['edit_data'].get('text', '')
+        saved_date = st.session_state['edit_data'].get('date')
+        if isinstance(saved_date, pd.Timestamp):
+            form_date = saved_date.date()
+        else:
+            form_date = datetime.datetime.now().date()
+            
     else:
         st.subheader("이번주의 레슨런을 기록해주세요")
         form_writer = ""
         form_text = ""
+        form_date = datetime.datetime.now().date()
 
     with st.form("record_form", clear_on_submit=True):
-        writer = st.text_input("작성자", value=form_writer)
+        c_input1, c_input2 = st.columns([1, 1])
+        with c_input1:
+            writer = st.text_input("작성자", value=form_writer, placeholder="이름 입력")
+        with c_input2:
+            selected_date = st.date_input("날짜", value=form_date)
+            
         text = st.text_area("내용 (Markdown 지원)", value=form_text, height=150)
         submitted = st.form_submit_button("수정 완료" if st.session_state['edit_mode'] else "기록 저장하기", use_container_width=True)
         
@@ -244,13 +248,13 @@ with tab1:
                 with st.spinner("✨ AI 분석 중..."):
                     keywords, category = analyze_text(text)
                     if st.session_state['edit_mode']:
-                        update_entry(st.session_state['edit_data']['id'], writer, text, keywords, category)
+                        update_entry(st.session_state['edit_data']['id'], writer, text, keywords, category, selected_date)
                         st.success("✅ 수정 완료!")
                         st.session_state['edit_mode'] = False
                         st.session_state['edit_data'] = {}
                         st.rerun()
                     else:
-                        save_entry(writer, text, keywords, category)
+                        save_entry(writer, text, keywords, category, selected_date)
                         st.success(f"✅ 저장 완료! ({category})")
 
     st.markdown("---")
@@ -273,7 +277,6 @@ with tab1:
         
         for idx, row in display_df.iterrows():
             with st.container(border=True):
-                # 수직 중앙 정렬 유지
                 c_head, c_btn1, c_btn2 = st.columns([8.8, 0.6, 0.6], gap="small", vertical_alignment="center")
                 with c_head:
                     date_str = row['date'].strftime('%Y-%m-%d') if isinstance(row['date'], pd.Timestamp) else str(row['date'])[:10]
@@ -320,7 +323,8 @@ with tab2:
             st.metric("최다 작성자", top_writer)
 
         with row1_col2:
-            st.subheader("🗺️ 지식 생태계")
+            # [변경] 지식 생태계 -> Keyword Map
+            st.subheader("🗺️ Keyword Map")
             with st.container(border=True):
                 if all_kws:
                     tree_data = []
