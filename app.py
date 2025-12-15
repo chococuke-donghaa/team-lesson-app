@@ -20,7 +20,7 @@ PURPLE_PALETTE = {
     800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
 }
 
-# [수정] Gap을 200 -> 600으로 늘림 (카드 간격 확장)
+# [기존 테마] 여기에 없는 카테고리가 나오면 '기타'와 같은 색상을 씁니다.
 CATEGORY_THEMES = {
     "기타": (400, 600), "기획": (500, 700), "개발": (600, 800),
     "디자인": (700, 900), "협업": (500, 700), "프로세스": (600, 800)
@@ -107,29 +107,25 @@ def analyze_text(text):
         
         model = genai.GenerativeModel(model_name)
         
+        # [수정] 카테고리 제한 해제 프롬프트
         prompt = f"""
         너는 팀의 레슨런(Lesson Learned)을 분류하는 데이터 관리자야.
         입력된 텍스트를 분석해서 다음 규칙에 맞춰 JSON으로 응답해.
 
-        [분류 기준표 (Standard Keywords)]
-        아래 카테고리별 표준 키워드를 참고해서 가장 적절한 것을 선택해.
-        - 기획: 기획의도, 정책수립, 일정관리, 데이터분석, 인사이트
-        - 개발: 트러블슈팅, 리팩토링, 신기술도입, 코드리뷰, 성능개선, 유지보수
-        - 디자인: UI/UX, 디자인시스템, 사용성개선, 디자인가이드
-        - 협업: 커뮤니케이션, 문서화, 회의문화, 피드백
-        - 프로세스: 업무효율화, 자동화, QA/테스트, 배포관리
-
-        [작성 규칙]
+        [키워드 작성 규칙]
         1. keywords: 총 2~3개의 키워드를 배열로 작성.
-           - **첫 번째 키워드**는 반드시 위 [분류 기준표]에 있는 단어 중 하나를 선택해서 넣어. (데이터 그룹핑용)
-           - 나머지 키워드는 본문 내용을 구체적으로 설명하는 단어를 자유롭게 넣어.
+           - 데이터 그룹핑을 위해 '기획', '개발', '디자인', '협업', '프로세스' 같은 표준 단어가 있다면 첫 번째 키워드로 넣어줘.
+           - 없다면 본문을 잘 설명하는 핵심 단어를 넣어줘.
            
-        2. category: 기획, 개발, 디자인, 협업, 프로세스, 기타 중 택1
+        [카테고리 작성 규칙]
+        2. category: **텍스트의 성격을 가장 잘 나타내는 명사형 단어 1개**를 작성해.
+           - 예시: 기획, 개발, 디자인, 협업, 프로세스, 마케팅, 비즈니스, HR, 복지 등 제한 없음.
+           - 너무 긴 문장은 안 되고, 핵심 주제 단어여야 해.
 
         [응답 형식 (JSON)]
         {{
-            "keywords": ["표준키워드", "상세키워드1", "상세키워드2"],
-            "category": "카테고리"
+            "keywords": ["키워드1", "키워드2"],
+            "category": "카테고리명"
         }}
         
         텍스트: {text}
@@ -137,8 +133,12 @@ def analyze_text(text):
         response = model.generate_content(prompt)
         text_resp = response.text.replace("```json", "").replace("```", "").strip()
         result = json.loads(text_resp)
+        
         cat = result.get("category", "기타")
-        if cat not in CATEGORY_THEMES: cat = "기타"
+        
+        # [삭제] 여기에 있던 'if cat not in CATEGORY_THEMES: cat = "기타"' 코드를 지웠습니다.
+        # 이제 AI가 뱉은 카테고리를 그대로 사용합니다.
+        
         return result.get("keywords", ["분석불가"]), cat
     except Exception as e:
         return ["AI연동실패"], "기타"
@@ -336,28 +336,32 @@ with tab2:
                     if tree_data:
                         tree_df = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
                         labels, parents, values, colors, text_colors, display_texts = [], [], [], [], [], []
+                        
                         categories = tree_df['Category'].unique()
                         for cat in categories:
                             cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
                             labels.append(cat); parents.append(""); values.append(cat_total)
+                            
+                            # [핵심] 새로운 카테고리가 나오면 '기타' 색상을 기본값으로 사용 (에러 방지)
                             color_indices = CATEGORY_THEMES.get(cat, CATEGORY_THEMES["기타"])
+                            
                             colors.append(PURPLE_PALETTE[color_indices[0]])
                             text_colors.append(get_text_color(color_indices[0]))
                             display_texts.append(f"{cat}")
 
                         for idx, row in tree_df.iterrows():
                             labels.append(row['Keyword']); parents.append(row['Category']); values.append(row['Value'])
+                            
+                            # [핵심] 키워드도 마찬가지로 안전하게 색상 처리
                             color_indices = CATEGORY_THEMES.get(row['Category'], CATEGORY_THEMES["기타"])
+                            
                             colors.append(PURPLE_PALETTE[color_indices[1]])
                             text_colors.append(get_text_color(color_indices[1]))
                             display_texts.append(f"{row['Keyword']}")
 
                         fig_tree = go.Figure(go.Treemap(
                             labels=labels, parents=parents, values=values,
-                            
-                            # [수정] 테두리(Stroke) 제거: width=0
                             marker=dict(colors=colors, line=dict(width=0, color=CARD_BG_COLOR)),
-                            
                             text=display_texts, 
                             textinfo="text",
                             textfont=dict(family="Pretendard", color=text_colors, size=20),
