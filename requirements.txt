@@ -1,5 +1,5 @@
+google-generativeai
 streamlit
 pandas
 plotly
-google-generativeai
-st-gsheets-connection
+streamlit-gsheets
