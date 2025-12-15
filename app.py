@@ -11,7 +11,6 @@ from streamlit_gsheets import GSheetsConnection
 # -----------------------------------------------------------------------------
 # 1. 설정 및 데이터 관리
 # -----------------------------------------------------------------------------
-# API 키 가져오기
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
 CARD_BG_COLOR = "#0E1117"
 
@@ -28,7 +27,7 @@ def get_connection():
 def load_data(force_reload=False):
     conn = get_connection()
     try:
-        # [핵심] 'Quota exceeded' 방지: 평소엔 10분간 캐시(기억) 사용
+        # [수정] 잦은 새로고침 에러 방지 (10분 캐시)
         ttl_val = 0 if force_reload else "10m"
         df = conn.read(ttl=ttl_val)
         
@@ -46,10 +45,8 @@ def load_data(force_reload=False):
         df = df.fillna("")
         return df
     except Exception as e:
-        # 사용량 초과 에러가 나면 사용자에게 친절하게 안내
         if "Quota" in str(e) or "429" in str(e):
-            st.warning("⏳ 구글 시트 연결이 너무 많아 잠시 쉬고 있습니다. 1분 뒤에 다시 시도해주세요!")
-            # 빈 데이터프레임 반환하여 앱이 멈추지 않게 함
+            st.warning("⏳ 구글 시트 연결량이 많아 잠시 대기 중입니다. 1분 뒤 다시 시도해주세요.")
             return pd.DataFrame(columns=["id", "date", "writer", "text", "keywords", "category"])
         else:
             st.error(f"데이터 로드 실패: {e}")
@@ -64,7 +61,6 @@ def save_data_to_sheet(df):
     st.cache_data.clear()
 
 def save_entry(writer, text, keywords, category, date_val):
-    # 저장할 때는 최신 데이터를 불러와서 합침 (충돌 방지)
     df = load_data(force_reload=True)
     if isinstance(category, list): cat_str = json.dumps(category, ensure_ascii=False)
     else: cat_str = json.dumps([str(category)], ensure_ascii=False)
@@ -114,7 +110,7 @@ def parse_json_list(data_str):
         return [clean_s] if clean_s else []
     except: return []
 
-# [핵심] 최신 모델(gemini-1.5-flash) 사용 설정
+# [수정] AI 분석 함수: 'gemini-pro'로 변경 (가장 안정적)
 def analyze_text(text):
     try:
         if not GOOGLE_API_KEY or GOOGLE_API_KEY == "YOUR_API_KEY":
@@ -122,8 +118,9 @@ def analyze_text(text):
             return ["키설정오류"], "기타"
 
         genai.configure(api_key=GOOGLE_API_KEY)
-        # 이제 requirements.txt 업데이트로 이 모델을 사용할 수 있습니다.
-        model = genai.GenerativeModel("gemini-1.5-flash") 
+        
+        # 1.5-flash 대신 gemini-pro 사용 (라이브러리 버전 문제 회피)
+        model = genai.GenerativeModel("gemini-pro") 
 
         prompt = f"""
         너는 팀의 레슨런을 분류하는 관리자야. 텍스트를 분석해서 JSON으로 답해줘.
@@ -142,7 +139,6 @@ def analyze_text(text):
         return result.get("keywords", ["분석불가"]), cat
 
     except Exception as e:
-        # 에러 발생 시 상세 내용 출력
         st.error(f"💥 AI 분석 에러: {str(e)}")
         return ["AI연동실패"], "기타"
 
@@ -164,6 +160,7 @@ if 'edit_data' not in st.session_state: st.session_state['edit_data'] = {}
 @st.dialog("⚠️ 삭제 확인")
 def confirm_delete_dialog(entry_id):
     st.write("정말 이 기록을 삭제하시겠습니까?")
+    st.caption("삭제된 데이터는 복구할 수 없습니다.")
     col_del, col_cancel = st.columns([1, 1])
     with col_del:
         if st.button("삭제", type="primary", use_container_width=True):
@@ -206,19 +203,19 @@ with col_head2:
 tab1, tab2 = st.tabs(["📝 배움 기록하기", "📊 통합 대시보드"])
 
 with tab1:
+    # [수정] NameError 방지: 변수 초기화 코드 복구
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
         if st.button("취소"):
             st.session_state['edit_mode'] = False; st.session_state['edit_data'] = {}; st.rerun()
         
-        # 수정 모드: 기존 데이터 로드 (NameError 방지)
         form_writer = st.session_state['edit_data'].get('writer', '')
         form_text = st.session_state['edit_data'].get('text', '')
         d_val = st.session_state['edit_data'].get('date')
         form_date = d_val.date() if isinstance(d_val, pd.Timestamp) else datetime.datetime.now().date()
     else:
-        # 새 글 모드: 빈 값 설정
         st.subheader("이번주의 레슨런을 기록해주세요")
+        # [중요] 여기 초기화 코드가 있어야 앱이 안 멈춥니다!
         form_writer = ""
         form_text = ""
         form_date = datetime.datetime.now().date()
@@ -235,10 +232,8 @@ with tab1:
             if not writer or not text: st.error("내용을 입력해주세요.")
             else:
                 with st.spinner("✨ AI 분석 중..."):
-                    # 1. AI 분석 수행
                     keywords, category = analyze_text(text)
                     
-                    # 2. 결과 저장
                     if st.session_state['edit_mode']:
                         update_entry(st.session_state['edit_data']['id'], writer, text, keywords, category, selected_date)
                         st.success("✅ 수정 완료!"); st.session_state['edit_mode'] = False; st.session_state['edit_data'] = {}; st.rerun()
