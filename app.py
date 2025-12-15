@@ -94,27 +94,39 @@ def get_available_model():
     except:
         return None
 
-# [핵심] 키워드 최적화 분석 함수
+# [핵심 변경] 표준 키워드 분류가 적용된 AI 분석 함수
 def analyze_text(text):
     try:
         model_name = get_available_model()
         if not model_name: return ["AI연동실패"], "기타"
         
         model = genai.GenerativeModel(model_name)
-        prompt = f"""
-        너는 팀의 레슨런(Lesson Learned)을 분석하는 데이터 전문가야.
-        다음 텍스트를 분석해서 JSON 형식으로만 응답해줘.
         
-        [규칙]
-        1. keywords: 
-           - 너무 세세한 단어(예: '로그인 버튼 폰트 12px') 대신 **통계를 낼 수 있는 범용적인 단어**(예: 'UI개선', '디자인시스템', '버그수정')로 추출해.
-           - 명사형으로 2~3개만 추출해.
-           - 예시: 'API 타임아웃 에러 해결' -> ["트러블슈팅", "API", "성능최적화"]
+        # [Taxonomy] 표준 키워드 리스트 적용
+        prompt = f"""
+        너는 팀의 레슨런(Lesson Learned)을 분류하는 데이터 관리자야.
+        입력된 텍스트를 분석해서 다음 규칙에 맞춰 JSON으로 응답해.
+
+        [분류 기준표 (Standard Keywords)]
+        아래 카테고리별 표준 키워드를 참고해서 가장 적절한 것을 선택해.
+        - 기획: 기획의도, 정책수립, 일정관리, 데이터분석, 인사이트
+        - 개발: 트러블슈팅, 리팩토링, 신기술도입, 코드리뷰, 성능개선, 유지보수
+        - 디자인: UI/UX, 디자인시스템, 사용성개선, 디자인가이드
+        - 협업: 커뮤니케이션, 문서화, 회의문화, 피드백
+        - 프로세스: 업무효율화, 자동화, QA/테스트, 배포관리
+
+        [작성 규칙]
+        1. keywords: 총 2~3개의 키워드를 배열로 작성.
+           - **첫 번째 키워드**는 반드시 위 [분류 기준표]에 있는 단어 중 하나를 선택해서 넣어. (데이터 그룹핑용)
+           - 나머지 키워드는 본문 내용을 구체적으로 설명하는 단어를 자유롭게 넣어.
+           - 예시: "디자인 시스템을 만들어서 통일성을 줬다" -> ["디자인시스템", "통일성", "작업효율"]
+           - 예시: "API 응답속도가 느려서 캐시를 적용했다" -> ["성능개선", "API", "캐싱"]
+        
         2. category: 기획, 개발, 디자인, 협업, 프로세스, 기타 중 택1
 
-        [응답 형식]
+        [응답 형식 (JSON)]
         {{
-            "keywords": ["키워드1", "키워드2"],
+            "keywords": ["표준키워드", "상세키워드1", "상세키워드2"],
             "category": "카테고리"
         }}
         
@@ -266,99 +278,3 @@ with tab1:
                         confirm_delete_dialog(row['id'])
 
                 st.markdown(f'<hr style="border: 0; border-top: 1px solid #30333F; margin: 5px 0 15px 0;">', unsafe_allow_html=True)
-                st.markdown(row['text'])
-                
-                try: kw_list = json.loads(row['keywords'])
-                except: kw_list = []
-                kw_str = "  ".join([f"#{k}" for k in kw_list])
-                
-                # 하단 뱃지/키워드
-                st.markdown(f"""<div style="margin-top: 20px; display: flex; align-items: center; gap: 10px;"><span style="background-color: {PURPLE_PALETTE[800]}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{row['category']}</span><span style="color: {PURPLE_PALETTE[400]}; font-size: 0.9rem;">{kw_str}</span></div>""", unsafe_allow_html=True)
-                
-                # 하단 여백 (20px)
-                st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
-            
-            # 카드 간 간격 (15px)
-            st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
-    else:
-        st.info("아직 기록된 내용이 없습니다.")
-
-with tab2:
-    df = load_data()
-    if not df.empty:
-        total = len(df)
-        top_cat = df['category'].mode()[0] if not df['category'].empty else "-"
-        top_writer = df['writer'].mode()[0] if not df['writer'].empty else "-"
-        try:
-            all_kws = []
-            for k in df['keywords']: all_kws.extend(json.loads(k))
-        except: all_kws = []
-        
-        row1_col1, row1_col2 = st.columns([1, 3])
-        with row1_col1:
-            st.subheader("Key Metrics")
-            st.metric("총 기록 수", f"{total}건")
-            st.metric("최다 카테고리", top_cat)
-            st.metric("누적 키워드", f"{len(set(all_kws))}개")
-            st.metric("최다 작성자", top_writer)
-
-        with row1_col2:
-            st.subheader("🗺️ 지식 생태계")
-            with st.container(border=True):
-                if all_kws:
-                    tree_data = []
-                    for idx, row in df.iterrows():
-                        try: kws = json.loads(row['keywords'])
-                        except: kws = []
-                        for k in kws: tree_data.append({'Category': row['category'], 'Keyword': k, 'Value': 1})
-                    
-                    if tree_data:
-                        tree_df = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
-                        labels, parents, values, colors, text_colors, display_texts = [], [], [], [], [], []
-                        categories = tree_df['Category'].unique()
-                        for cat in categories:
-                            cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
-                            labels.append(cat); parents.append(""); values.append(cat_total)
-                            color_indices = CATEGORY_THEMES.get(cat, CATEGORY_THEMES["기타"])
-                            colors.append(PURPLE_PALETTE[color_indices[0]])
-                            text_colors.append(get_text_color(color_indices[0]))
-                            display_texts.append(f"<span style='font-size:20px; font-weight:700;'>{cat}</span>")
-
-                        for idx, row in tree_df.iterrows():
-                            labels.append(row['Keyword']); parents.append(row['Category']); values.append(row['Value'])
-                            color_indices = CATEGORY_THEMES.get(row['Category'], CATEGORY_THEMES["기타"])
-                            colors.append(PURPLE_PALETTE[color_indices[1]])
-                            text_colors.append(get_text_color(color_indices[1]))
-                            display_texts.append(f"<span style='font-size:20px; font-weight:700;'>{row['Keyword']}</span>")
-
-                        fig_tree = go.Figure(go.Treemap(
-                            labels=labels, parents=parents, values=values,
-                            marker=dict(colors=colors, line=dict(width=2, color=CARD_BG_COLOR)),
-                            text=display_texts, textinfo="text",
-                            textfont=dict(family="Pretendard", color=text_colors),
-                            branchvalues="total", pathbar=dict(visible=False), textposition="middle center" 
-                        ))
-                        fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=520, paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
-                        st.plotly_chart(fig_tree, use_container_width=True)
-                else: st.info("데이터가 부족합니다.")
-        st.markdown("---")
-        col_chart1, col_chart2 = st.columns(2)
-        with col_chart1:
-            st.subheader("📊 카테고리 비중")
-            with st.container(border=True):
-                cat_counts = df['category'].value_counts().reset_index()
-                cat_counts.columns = ['category', 'count']
-                fig_pie = px.pie(cat_counts, values='count', names='category', hole=0.6, color_discrete_sequence=[PURPLE_PALETTE[i] for i in [500, 600, 700, 800, 900, 400]])
-                fig_pie.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=350, paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
-                st.plotly_chart(fig_pie, use_container_width=True)
-        with col_chart2:
-            st.subheader("🏆 Top 키워드")
-            with st.container(border=True):
-                if all_kws:
-                    kw_counts = pd.Series(all_kws).value_counts().head(10).reset_index()
-                    kw_counts.columns = ['keyword', 'count']
-                    fig_bar = go.Figure(go.Bar(x=kw_counts['count'], y=kw_counts['keyword'], orientation='h', text=kw_counts['count'], textposition='outside', marker=dict(color=PURPLE_PALETTE[600], opacity=1.0, line=dict(width=0))))
-                    fig_bar.update_layout(xaxis=dict(showgrid=False, visible=False), yaxis=dict(showgrid=False, autorange="reversed"), margin=dict(t=20, b=20, l=10, r=40), height=350, paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
-                    st.plotly_chart(fig_bar, use_container_width=True)
-                else: st.info("데이터가 없습니다.")
-    else: st.info("첫 기록을 남겨보세요!")
