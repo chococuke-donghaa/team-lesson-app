@@ -110,17 +110,48 @@ def parse_json_list(data_str):
         return [clean_s] if clean_s else []
     except: return []
 
-# [수정] AI 분석 함수: 'gemini-pro'로 변경 (가장 안정적)
+# [핵심 기능 추가] 사용 가능한 모델을 자동으로 찾는 함수
+def find_working_model():
+    try:
+        genai.configure(api_key=GOOGLE_API_KEY)
+        # 사용 가능한 모델 목록 조회
+        available_models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                available_models.append(m.name)
+        
+        # 'gemini'가 포함된 모델 중 가장 최신 것 선택 (없으면 gemini-pro)
+        # 우선순위: 1.5-flash -> 1.5-pro -> gemini-pro
+        for model_name in available_models:
+            if "gemini-1.5-flash" in model_name: return model_name
+        for model_name in available_models:
+            if "gemini-1.5-pro" in model_name: return model_name
+        for model_name in available_models:
+            if "gemini-pro" in model_name: return model_name
+            
+        # 아무것도 못 찾으면 목록의 첫 번째 반환
+        return available_models[0] if available_models else None
+    except:
+        return None
+
+# [수정] AI 분석 함수: 자동 모델 찾기 적용
 def analyze_text(text):
     try:
         if not GOOGLE_API_KEY or GOOGLE_API_KEY == "YOUR_API_KEY":
             st.error("🚨 API 키가 설정되지 않았습니다.")
             return ["키설정오류"], "기타"
 
-        genai.configure(api_key=GOOGLE_API_KEY)
+        # 1. 작동하는 모델 찾기
+        model_name = find_working_model()
         
-        # 1.5-flash 대신 gemini-pro 사용 (라이브러리 버전 문제 회피)
-        model = genai.GenerativeModel("gemini-pro") 
+        if not model_name:
+            st.error("🚨 사용 가능한 Gemini 모델을 찾을 수 없습니다. API 키 권한을 확인하세요.")
+            return ["모델없음"], "기타"
+            
+        # (디버깅용) 어떤 모델 쓰는지 화면에 작게 표시
+        st.toast(f"🤖 AI 모델 연결 성공: {model_name}") 
+
+        model = genai.GenerativeModel(model_name)
 
         prompt = f"""
         너는 팀의 레슨런을 분류하는 관리자야. 텍스트를 분석해서 JSON으로 답해줘.
@@ -203,7 +234,6 @@ with col_head2:
 tab1, tab2 = st.tabs(["📝 배움 기록하기", "📊 통합 대시보드"])
 
 with tab1:
-    # [수정] NameError 방지: 변수 초기화 코드 복구
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
         if st.button("취소"):
@@ -215,7 +245,6 @@ with tab1:
         form_date = d_val.date() if isinstance(d_val, pd.Timestamp) else datetime.datetime.now().date()
     else:
         st.subheader("이번주의 레슨런을 기록해주세요")
-        # [중요] 여기 초기화 코드가 있어야 앱이 안 멈춥니다!
         form_writer = ""
         form_text = ""
         form_date = datetime.datetime.now().date()
