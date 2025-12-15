@@ -6,11 +6,12 @@ import google.generativeai as genai
 import plotly.express as px
 import plotly.graph_objects as go
 import uuid
-from streamlit_gsheets import GSheetsConnection  # [NEW] 구글 시트 연결 라이브러리
+from streamlit_gsheets import GSheetsConnection
 
 # -----------------------------------------------------------------------------
 # 1. 설정 및 데이터 관리
 # -----------------------------------------------------------------------------
+# [주의] Streamlit Cloud Secrets에 GOOGLE_API_KEY가 설정되어 있어야 합니다.
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
 CARD_BG_COLOR = "#0E1117"
 
@@ -30,35 +31,27 @@ CATEGORY_THEMES = {
 def get_text_color(palette_index):
     return "#FFFFFF"
 
-# [NEW] 구글 시트 연결 객체 생성
+# 구글 시트 연결
 def get_connection():
     return st.connection("gsheets", type=GSheetsConnection)
 
-# [NEW] 데이터 로드 (구글 시트에서 읽기)
+# 데이터 로드
 def load_data():
     conn = get_connection()
     try:
-        # ttl=0 으로 설정하여 항상 최신 데이터를 가져옴
         df = conn.read(ttl=0)
-        
-        # 데이터가 비어있거나 필수 컬럼이 없으면 초기화
         if df.empty or 'id' not in df.columns:
             return pd.DataFrame(columns=["id", "date", "writer", "text", "keywords", "category"])
-            
-        # 날짜 컬럼 변환
         if 'date' in df.columns:
             df['date'] = pd.to_datetime(df['date'])
-        
-        # 결측치 처리 (NaN 방지)
         df = df.fillna("")
         return df
     except Exception:
         return pd.DataFrame(columns=["id", "date", "writer", "text", "keywords", "category"])
 
-# [NEW] 데이터 저장 (구글 시트에 덮어쓰기)
+# 데이터 저장
 def save_data_to_sheet(df):
     conn = get_connection()
-    # 날짜를 문자열로 변환하여 저장 (엑셀 호환성)
     save_df = df.copy()
     save_df['date'] = save_df['date'].dt.strftime('%Y-%m-%d')
     conn.update(data=save_df)
@@ -101,6 +94,7 @@ def get_available_model():
     except:
         return None
 
+# [핵심] 키워드 최적화 분석 함수
 def analyze_text(text):
     try:
         model_name = get_available_model()
@@ -108,11 +102,22 @@ def analyze_text(text):
         
         model = genai.GenerativeModel(model_name)
         prompt = f"""
+        너는 팀의 레슨런(Lesson Learned)을 분석하는 데이터 전문가야.
         다음 텍스트를 분석해서 JSON 형식으로만 응답해줘.
+        
+        [규칙]
+        1. keywords: 
+           - 너무 세세한 단어(예: '로그인 버튼 폰트 12px') 대신 **통계를 낼 수 있는 범용적인 단어**(예: 'UI개선', '디자인시스템', '버그수정')로 추출해.
+           - 명사형으로 2~3개만 추출해.
+           - 예시: 'API 타임아웃 에러 해결' -> ["트러블슈팅", "API", "성능최적화"]
+        2. category: 기획, 개발, 디자인, 협업, 프로세스, 기타 중 택1
+
+        [응답 형식]
         {{
-            "keywords": ["키워드1", "키워드2", "키워드3"],
-            "category": "카테고리(기획, 개발, 디자인, 협업, 프로세스, 기타 중 택1)"
+            "keywords": ["키워드1", "키워드2"],
+            "category": "카테고리"
         }}
+        
         텍스트: {text}
         """
         response = model.generate_content(prompt)
@@ -246,6 +251,7 @@ with tab1:
         
         for idx, row in display_df.iterrows():
             with st.container(border=True):
+                # 수직 중앙 정렬 적용
                 c_head, c_btn1, c_btn2 = st.columns([8.8, 0.6, 0.6], gap="small", vertical_alignment="center")
                 with c_head:
                     date_str = row['date'].strftime('%Y-%m-%d') if isinstance(row['date'], pd.Timestamp) else str(row['date'])[:10]
@@ -266,8 +272,13 @@ with tab1:
                 except: kw_list = []
                 kw_str = "  ".join([f"#{k}" for k in kw_list])
                 
+                # 하단 뱃지/키워드
                 st.markdown(f"""<div style="margin-top: 20px; display: flex; align-items: center; gap: 10px;"><span style="background-color: {PURPLE_PALETTE[800]}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{row['category']}</span><span style="color: {PURPLE_PALETTE[400]}; font-size: 0.9rem;">{kw_str}</span></div>""", unsafe_allow_html=True)
+                
+                # 하단 여백 (20px)
                 st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+            
+            # 카드 간 간격 (15px)
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
     else:
         st.info("아직 기록된 내용이 없습니다.")
