@@ -27,7 +27,7 @@ def get_connection():
 def load_data(force_reload=False):
     conn = get_connection()
     try:
-        # [수정] 잦은 새로고침 에러 방지 (10분 캐시)
+        # 사용량 초과 방지: 10분 캐싱
         ttl_val = 0 if force_reload else "10m"
         df = conn.read(ttl=ttl_val)
         
@@ -46,7 +46,7 @@ def load_data(force_reload=False):
         return df
     except Exception as e:
         if "Quota" in str(e) or "429" in str(e):
-            st.warning("⏳ 구글 시트 연결량이 많아 잠시 대기 중입니다. 1분 뒤 다시 시도해주세요.")
+            st.toast("⏳ 구글 시트가 바쁩니다. 잠시만 기다려주세요.", icon="⚠️")
             return pd.DataFrame(columns=["id", "date", "writer", "text", "keywords", "category"])
         else:
             st.error(f"데이터 로드 실패: {e}")
@@ -110,48 +110,44 @@ def parse_json_list(data_str):
         return [clean_s] if clean_s else []
     except: return []
 
-# [핵심 기능 추가] 사용 가능한 모델을 자동으로 찾는 함수
-def find_working_model():
+# [진단 기능] 설치된 버전 확인 및 모델 테스트
+def check_ai_status():
+    status_log = []
     try:
+        # 1. 라이브러리 버전 확인
+        lib_version = genai.__version__
+        status_log.append(f"📦 라이브러리 버전: {lib_version}")
+        
+        # 2. 키 확인
+        if not GOOGLE_API_KEY or GOOGLE_API_KEY == "YOUR_API_KEY":
+            status_log.append("❌ API 키 없음")
+            return False, status_log, "API Key Missing"
+        
         genai.configure(api_key=GOOGLE_API_KEY)
-        # 사용 가능한 모델 목록 조회
-        available_models = []
+        
+        # 3. 모델 목록 조회 시도
+        models = []
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
-                available_models.append(m.name)
+                models.append(m.name)
         
-        # 'gemini'가 포함된 모델 중 가장 최신 것 선택 (없으면 gemini-pro)
-        # 우선순위: 1.5-flash -> 1.5-pro -> gemini-pro
-        for model_name in available_models:
-            if "gemini-1.5-flash" in model_name: return model_name
-        for model_name in available_models:
-            if "gemini-1.5-pro" in model_name: return model_name
-        for model_name in available_models:
-            if "gemini-pro" in model_name: return model_name
+        status_log.append(f"📋 사용 가능 모델: {', '.join(models)}")
+        
+        if not models:
+            return False, status_log, "No Models Found"
             
-        # 아무것도 못 찾으면 목록의 첫 번째 반환
-        return available_models[0] if available_models else None
-    except:
-        return None
+        return True, status_log, None
+        
+    except Exception as e:
+        return False, status_log, str(e)
 
-# [수정] AI 분석 함수: 자동 모델 찾기 적용
+# [수정] AI 분석 함수 (에러 발생 시 중단하지 않고 메시지 반환)
 def analyze_text(text):
     try:
-        if not GOOGLE_API_KEY or GOOGLE_API_KEY == "YOUR_API_KEY":
-            st.error("🚨 API 키가 설정되지 않았습니다.")
-            return ["키설정오류"], "기타"
-
-        # 1. 작동하는 모델 찾기
-        model_name = find_working_model()
+        genai.configure(api_key=GOOGLE_API_KEY)
         
-        if not model_name:
-            st.error("🚨 사용 가능한 Gemini 모델을 찾을 수 없습니다. API 키 권한을 확인하세요.")
-            return ["모델없음"], "기타"
-            
-        # (디버깅용) 어떤 모델 쓰는지 화면에 작게 표시
-        st.toast(f"🤖 AI 모델 연결 성공: {model_name}") 
-
-        model = genai.GenerativeModel(model_name)
+        # gemini-pro 사용 (가장 호환성 좋음)
+        model = genai.GenerativeModel("gemini-pro") 
 
         prompt = f"""
         너는 팀의 레슨런을 분류하는 관리자야. 텍스트를 분석해서 JSON으로 답해줘.
@@ -167,11 +163,11 @@ def analyze_text(text):
         cat = result.get("category", "기타")
         if isinstance(cat, list): cat = cat[0] if cat else "기타"
         
-        return result.get("keywords", ["분석불가"]), cat
+        return result.get("keywords", ["분석불가"]), cat, None # None은 에러 없음 의미
 
     except Exception as e:
-        st.error(f"💥 AI 분석 에러: {str(e)}")
-        return ["AI연동실패"], "기타"
+        # 에러 객체를 그대로 반환하여 UI에서 출력
+        return ["AI연동실패"], "기타", str(e)
 
 def get_month_week_str(date_obj):
     try:
@@ -187,18 +183,6 @@ st.set_page_config(page_title="Team Lesson Learned", layout="wide")
 
 if 'edit_mode' not in st.session_state: st.session_state['edit_mode'] = False
 if 'edit_data' not in st.session_state: st.session_state['edit_data'] = {}
-
-@st.dialog("⚠️ 삭제 확인")
-def confirm_delete_dialog(entry_id):
-    st.write("정말 이 기록을 삭제하시겠습니까?")
-    st.caption("삭제된 데이터는 복구할 수 없습니다.")
-    col_del, col_cancel = st.columns([1, 1])
-    with col_del:
-        if st.button("삭제", type="primary", use_container_width=True):
-            delete_entry(entry_id)
-            st.rerun()
-    with col_cancel:
-        if st.button("취소", use_container_width=True): st.rerun()
 
 st.markdown(f"""
     <style>
@@ -220,6 +204,27 @@ st.markdown(f"""
     button[kind="secondary"]:hover {{ border-color: {PURPLE_PALETTE[500]}; color: {PURPLE_PALETTE[500]}; }}
     </style>
 """, unsafe_allow_html=True)
+
+# -----------------------------------------------------------------------------
+# [신규] 사이드바에 AI 진단 도구 추가
+# -----------------------------------------------------------------------------
+with st.sidebar:
+    st.header("🔧 시스템 상태")
+    if st.button("AI 연결 진단하기", type="primary"):
+        with st.spinner("진단 중..."):
+            is_ok, logs, err = check_ai_status()
+            
+            st.markdown("### 📋 진단 로그")
+            for log in logs:
+                st.text(log)
+            
+            if is_ok:
+                st.success("✅ AI 시스템 정상!")
+            else:
+                st.error("🚨 AI 연결 실패")
+                st.code(err)
+                if "404" in str(err) and "models" in str(err):
+                    st.warning("💡 팁: requirements.txt의 버전이 낮아서 그렇습니다. 앱을 재배포(Delete -> Deploy)하면 해결됩니다.")
 
 col_head1, col_head2 = st.columns([5, 1])
 with col_head1:
@@ -261,14 +266,25 @@ with tab1:
             if not writer or not text: st.error("내용을 입력해주세요.")
             else:
                 with st.spinner("✨ AI 분석 중..."):
-                    keywords, category = analyze_text(text)
+                    # 분석 결과와 에러 메시지를 함께 받음
+                    keywords, category, error_msg = analyze_text(text)
                     
-                    if st.session_state['edit_mode']:
-                        update_entry(st.session_state['edit_data']['id'], writer, text, keywords, category, selected_date)
-                        st.success("✅ 수정 완료!"); st.session_state['edit_mode'] = False; st.session_state['edit_data'] = {}; st.rerun()
+                    # 에러가 있었다면 저장을 멈추고 에러 내용을 고정해서 보여줌 (사라지지 않음)
+                    if error_msg:
+                        st.error("🚨 AI 분석 중 오류가 발생했습니다!")
+                        st.code(error_msg)
+                        st.info("이 메시지를 캡쳐해서 알려주세요. (데이터는 저장되지 않았습니다)")
                     else:
-                        save_entry(writer, text, keywords, category, selected_date)
-                        st.success(f"✅ 저장 완료! ({category})")
+                        # 에러가 없을 때만 저장 진행
+                        if st.session_state['edit_mode']:
+                            update_entry(st.session_state['edit_data']['id'], writer, text, keywords, category, selected_date)
+                            st.success("✅ 수정 완료!")
+                            st.session_state['edit_mode'] = False
+                            st.session_state['edit_data'] = {}
+                            st.rerun()
+                        else:
+                            save_entry(writer, text, keywords, category, selected_date)
+                            st.success(f"✅ 저장 완료! ({category})")
 
     st.markdown("---")
     
