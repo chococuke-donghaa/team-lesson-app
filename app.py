@@ -146,8 +146,8 @@ def analyze_text(text):
     try:
         genai.configure(api_key=GOOGLE_API_KEY)
         
-        # gemini-pro 사용 (가장 호환성 좋음)
-        model = genai.GenerativeModel("gemini-pro") 
+        # gemini-2.5-flash 사용
+        model = genai.GenerativeModel("gemini-2.5-flash") 
 
         prompt = f"""
         너는 팀의 레슨런을 분류하는 관리자야. 텍스트를 분석해서 JSON으로 답해줘.
