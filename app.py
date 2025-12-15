@@ -6,6 +6,7 @@ import google.generativeai as genai
 import plotly.express as px
 import plotly.graph_objects as go
 import uuid
+import threading  # [NEW] 백그라운드 작업을 위한 모듈
 from streamlit_gsheets import GSheetsConnection
 
 # -----------------------------------------------------------------------------
@@ -43,7 +44,7 @@ def load_data():
         df = df.fillna("")
         return df
     except Exception as e:
-        st.error(f"데이터를 불러오는 중 문제가 발생했습니다: {e}")
+        # st.error(f"데이터를 불러오는 중 문제가 발생했습니다: {e}") # 사용자에게 에러 노출 최소화
         return pd.DataFrame(columns=["id", "date", "writer", "text", "keywords", "category"])
 
 def save_data_to_sheet(df):
@@ -53,56 +54,82 @@ def save_data_to_sheet(df):
         save_df['date'] = save_df['date'].dt.strftime('%Y-%m-%d')
     conn.update(data=save_df)
 
-# [수정] categories(리스트)를 받아서 JSON 문자열로 저장
-def save_entry(writer, text, keywords, categories, date_val):
+# [NEW] 백그라운드에서 AI 분석 후 업데이트하는 함수
+def background_ai_task(entry_id, text):
+    try:
+        # 1. AI 분석 수행
+        keywords, categories = analyze_text(text)
+        
+        # 2. 분석 결과 JSON 변환
+        kw_json = json.dumps(keywords, ensure_ascii=False)
+        cat_json = json.dumps(categories, ensure_ascii=False)
+        
+        # 3. 시트 데이터 다시 로드 및 업데이트
+        # (주의: 스레드 안이라 st.connection을 새로 호출해야 안전함)
+        df = load_data()
+        idx = df[df['id'] == entry_id].index
+        
+        if not idx.empty:
+            df.at[idx[0], 'keywords'] = kw_json
+            df.at[idx[0], 'category'] = cat_json
+            save_data_to_sheet(df)
+            print(f"✅ [백그라운드 완료] ID: {entry_id} 분석 끝!")
+            
+    except Exception as e:
+        print(f"❌ [백그라운드 에러] {e}")
+
+# [수정] 저장 시 '분석중' 상태로 먼저 저장하고 스레드 시작
+def save_entry(writer, text, date_val):
     df = load_data()
     
-    # 카테고리가 리스트인지 확인하고 JSON 변환
-    if isinstance(categories, list):
-        cat_str = json.dumps(categories, ensure_ascii=False)
-    else:
-        cat_str = json.dumps([categories], ensure_ascii=False)
+    new_id = str(uuid.uuid4())
+    
+    # 일단 '분석중' 상태로 저장
+    placeholder_cat = json.dumps(["⏳ 분석중..."], ensure_ascii=False)
+    placeholder_kw = json.dumps([], ensure_ascii=False)
 
     new_data = pd.DataFrame({
-        "id": [str(uuid.uuid4())],
+        "id": [new_id],
         "date": [pd.to_datetime(date_val)],
         "writer": [writer],
         "text": [text],
-        "keywords": [json.dumps(keywords, ensure_ascii=False)],
-        "category": [cat_str] # JSON 문자열로 저장
+        "keywords": [placeholder_kw],
+        "category": [placeholder_cat]
     })
     df = pd.concat([df, new_data], ignore_index=True)
     save_data_to_sheet(df)
+    
+    # [핵심] 백그라운드 스레드 시작 (사용자는 기다리지 않음)
+    thread = threading.Thread(target=background_ai_task, args=(new_id, text))
+    thread.start()
 
-def update_entry(entry_id, writer, text, keywords, categories, date_val):
+# [수정] 수정 시에도 동일하게 적용
+def update_entry(entry_id, writer, text, date_val):
     df = load_data()
     idx = df[df['id'] == entry_id].index
     
-    if isinstance(categories, list):
-        cat_str = json.dumps(categories, ensure_ascii=False)
-    else:
-        cat_str = json.dumps([categories], ensure_ascii=False)
+    placeholder_cat = json.dumps(["⏳ 재분석중..."], ensure_ascii=False)
 
     if not idx.empty:
         df.at[idx[0], 'writer'] = writer
         df.at[idx[0], 'text'] = text
-        df.at[idx[0], 'keywords'] = json.dumps(keywords, ensure_ascii=False)
-        df.at[idx[0], 'category'] = cat_str
+        df.at[idx[0], 'category'] = placeholder_cat # 분석중으로 변경
         df.at[idx[0], 'date'] = pd.to_datetime(date_val)
         save_data_to_sheet(df)
+        
+        # 백그라운드 스레드 시작
+        thread = threading.Thread(target=background_ai_task, args=(entry_id, text))
+        thread.start()
 
 def delete_entry(entry_id):
     df = load_data()
     df = df[df['id'] != entry_id]
     save_data_to_sheet(df)
 
-# [NEW] 카테고리 데이터 파싱 헬퍼 함수 (구버전 데이터 호환용)
 def parse_categories(cat_data):
     try:
-        # JSON 형식의 리스트 문자열인 경우 (예: '["기획", "디자인"]')
         if cat_data.strip().startswith("["):
             return json.loads(cat_data)
-        # 그냥 문자열인 경우 (예: "기획") -> 리스트로 감싸서 반환
         else:
             return [cat_data] if cat_data else ["기타"]
     except:
@@ -125,7 +152,6 @@ def analyze_text(text):
         
         model = genai.GenerativeModel(model_name)
         
-        # [수정] 다중 카테고리 요청 프롬프트
         prompt = f"""
         너는 팀의 레슨런(Lesson Learned)을 분류하는 데이터 관리자야.
         입력된 텍스트를 분석해서 다음 규칙에 맞춰 JSON으로 응답해.
@@ -153,9 +179,8 @@ def analyze_text(text):
         text_resp = response.text.replace("```json", "").replace("```", "").strip()
         result = json.loads(text_resp)
         
-        # categories 키로 받음
         cats = result.get("categories", ["기타"])
-        if isinstance(cats, str): cats = [cats] # 혹시 문자열로 오면 리스트로 변환
+        if isinstance(cats, str): cats = [cats] 
         
         return result.get("keywords", ["분석불가"]), cats
     except Exception as e:
@@ -264,18 +289,18 @@ with tab1:
             if not writer or not text:
                 st.error("내용을 입력해주세요.")
             else:
-                with st.spinner("✨ AI 분석 중..."):
-                    keywords, categories = analyze_text(text) # 리스트 반환
-                    if st.session_state['edit_mode']:
-                        update_entry(st.session_state['edit_data']['id'], writer, text, keywords, categories, selected_date)
-                        st.success("✅ 수정 완료!")
-                        st.session_state['edit_mode'] = False
-                        st.session_state['edit_data'] = {}
-                        st.rerun()
-                    else:
-                        save_entry(writer, text, keywords, categories, selected_date)
-                        st.success(f"✅ 저장 완료! ({', '.join(categories)})")
-
+                # [수정] 이제 여기서 AI를 기다리지 않습니다!
+                if st.session_state['edit_mode']:
+                    update_entry(st.session_state['edit_data']['id'], writer, text, selected_date)
+                    st.success("✅ 수정 완료! (AI가 백그라운드에서 분석 중입니다...)")
+                    st.session_state['edit_mode'] = False
+                    st.session_state['edit_data'] = {}
+                    st.rerun()
+                else:
+                    save_entry(writer, text, selected_date)
+                    st.success("✅ 저장 완료! (AI가 백그라운드에서 분석 중입니다...)")
+                    # 여기서 st.rerun()을 하면 폼이 초기화되어 바로 다음 글을 쓸 수 있습니다.
+                    
     st.markdown("---")
     
     df = load_data()
@@ -316,11 +341,15 @@ with tab1:
                 except: kw_list = []
                 kw_str = "  ".join([f"#{k}" for k in kw_list])
                 
-                # [수정] 카테고리 여러개 표시 로직
                 cats = parse_categories(row['category'])
                 cat_badges = ""
                 for c in cats:
-                     cat_badges += f'<span style="background-color: {PURPLE_PALETTE[800]}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; margin-right: 5px;">{c}</span>'
+                    # 분석중일 때와 아닐 때 색상 구분
+                    bg_color = PURPLE_PALETTE[800]
+                    if "분석중" in c or "재분석중" in c:
+                        bg_color = "#555555" # 회색
+
+                    cat_badges += f'<span style="background-color: {bg_color}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; margin-right: 5px;">{c}</span>'
 
                 st.markdown(f"""<div style="margin-top: 20px; display: flex; align-items: center; gap: 5px;">{cat_badges}<span style="color: {PURPLE_PALETTE[400]}; font-size: 0.9rem; margin-left: 5px;">{kw_str}</span></div>""", unsafe_allow_html=True)
                 st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
@@ -339,10 +368,12 @@ def get_relative_color(val, max_val):
 with tab2:
     df = load_data()
     if not df.empty:
-        # [수정] 통계 계산 시 다중 카테고리 풀어서 계산
         all_cats_flat = []
         for c_data in df['category']:
-             all_cats_flat.extend(parse_categories(c_data))
+             # 분석중인 데이터는 통계에서 제외
+             cats = parse_categories(c_data)
+             real_cats = [c for c in cats if "분석중" not in c and "재분석중" not in c]
+             all_cats_flat.extend(real_cats)
         
         total = len(df)
         top_cat = pd.Series(all_cats_flat).mode()[0] if all_cats_flat else "-"
@@ -368,9 +399,10 @@ with tab2:
                     for idx, row in df.iterrows():
                         try: kws = json.loads(row['keywords'])
                         except: kws = []
-                        # [핵심] 다중 카테고리 처리: 카테고리 리스트를 순회하며 모두 추가
                         cats = parse_categories(row['category'])
                         for c in cats:
+                            # 분석중인 데이터는 차트에서 제외
+                            if "분석중" in c or "재분석중" in c: continue
                             for k in kws: 
                                 tree_data.append({'Category': c, 'Keyword': k, 'Value': 1})
                     
@@ -414,7 +446,6 @@ with tab2:
         with col_chart1:
             st.subheader("📊 카테고리 비중")
             with st.container(border=True):
-                # [수정] 파이차트도 다중 카테고리 반영
                 cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
                 cat_counts.columns = ['category', 'count']
                 
