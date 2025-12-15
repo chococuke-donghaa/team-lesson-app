@@ -40,6 +40,7 @@ def load_data():
         if 'date' in df.columns:
             df['date'] = pd.to_datetime(df['date'], errors='coerce')
         
+        # [안전장치] 빈 값은 빈 문자열로 채움
         df = df.fillna("")
         return df
     except Exception as e:
@@ -61,7 +62,7 @@ def save_entry(writer, text, keywords, category, date_val):
         "writer": [writer],
         "text": [text],
         "keywords": [json.dumps(keywords, ensure_ascii=False)],
-        "category": [category]
+        "category": [category] # 단일 문자열 저장
     })
     df = pd.concat([df, new_data], ignore_index=True)
     save_data_to_sheet(df)
@@ -99,19 +100,17 @@ def analyze_text(text):
         
         model = genai.GenerativeModel(model_name)
         
+        # [복구] 단일 카테고리 요청 프롬프트
         prompt = f"""
         너는 팀의 레슨런(Lesson Learned)을 분류하는 데이터 관리자야.
         입력된 텍스트를 분석해서 다음 규칙에 맞춰 JSON으로 응답해.
 
         [키워드 작성 규칙]
         1. keywords: 총 2~3개의 키워드를 배열로 작성.
-           - 데이터 그룹핑을 위해 '기획', '개발', '디자인', '협업', '프로세스' 같은 표준 단어가 있다면 첫 번째 키워드로 넣어줘.
-           - 없다면 본문을 잘 설명하는 핵심 단어를 넣어줘.
            
         [카테고리 작성 규칙]
         2. category: **텍스트의 성격을 가장 잘 나타내는 명사형 단어 1개**를 작성해.
-           - 예시: 기획, 개발, 디자인, 협업, 프로세스, 마케팅, 비즈니스, HR, 복지 등 제한 없음.
-           - 너무 긴 문장은 안 되고, 핵심 주제 단어여야 해.
+           - 예시: 기획, 개발, 디자인, 협업, 프로세스 등.
 
         [응답 형식 (JSON)]
         {{
@@ -284,7 +283,7 @@ with tab1:
                 except: kw_list = []
                 kw_str = "  ".join([f"#{k}" for k in kw_list])
                 
-                # 하단 뱃지
+                # 하단 뱃지: 기본 보라색 통일
                 st.markdown(f"""<div style="margin-top: 20px; display: flex; align-items: center; gap: 10px;"><span style="background-color: {PURPLE_PALETTE[800]}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{row['category']}</span><span style="color: {PURPLE_PALETTE[400]}; font-size: 0.9rem;">{kw_str}</span></div>""", unsafe_allow_html=True)
                 st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
@@ -295,20 +294,23 @@ with tab1:
 def get_relative_color(val, max_val):
     if max_val == 0: return PURPLE_PALETTE[400]
     ratio = val / max_val
-    if ratio >= 0.75: return PURPLE_PALETTE[900] # 상위 25% (가장 진함)
-    elif ratio >= 0.50: return PURPLE_PALETTE[700] # 상위 50% (진함)
-    elif ratio >= 0.25: return PURPLE_PALETTE[500] # 상위 75% (보통)
-    else: return PURPLE_PALETTE[400]             # 하위 25% (연함)
+    if ratio >= 0.75: return PURPLE_PALETTE[900]
+    elif ratio >= 0.50: return PURPLE_PALETTE[700]
+    elif ratio >= 0.25: return PURPLE_PALETTE[500]
+    else: return PURPLE_PALETTE[400]
 
 with tab2:
     df = load_data()
     if not df.empty:
         total = len(df)
+        # [복구] 단일 카테고리 계산 방식
         top_cat = df['category'].mode()[0] if not df['category'].empty else "-"
         top_writer = df['writer'].mode()[0] if not df['writer'].empty else "-"
         try:
             all_kws = []
-            for k in df['keywords']: all_kws.extend(json.loads(k))
+            # [중요 안전장치] keywords가 비어있으면 json.loads 에러가 나므로 체크
+            for k in df['keywords']: 
+                if k: all_kws.extend(json.loads(k))
         except: all_kws = []
         
         row1_col1, row1_col2 = st.columns([1, 3])
@@ -327,17 +329,16 @@ with tab2:
                     for idx, row in df.iterrows():
                         try: kws = json.loads(row['keywords'])
                         except: kws = []
-                        for k in kws: tree_data.append({'Category': row['category'], 'Keyword': k, 'Value': 1})
+                        # [복구] 단일 카테고리 로직
+                        for k in kws: 
+                            tree_data.append({'Category': row['category'], 'Keyword': k, 'Value': 1})
                     
                     if tree_data:
                         tree_df = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
-                        
-                        # [핵심] 전체 데이터 중 최대 빈도수 계산 (상대평가 기준점)
                         max_frequency = tree_df['Value'].max() if not tree_df.empty else 1
                         
                         labels, parents, values, colors, text_colors, display_texts = [], [], [], [], [], []
                         
-                        # 카테고리 처리
                         categories = tree_df['Category'].unique()
                         for cat in categories:
                             cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
@@ -347,23 +348,16 @@ with tab2:
                             text_colors.append("#FFFFFF")
                             display_texts.append(f"{cat}")
 
-                        # 키워드 처리
                         for idx, row in tree_df.iterrows():
                             labels.append(row['Keyword']); parents.append(row['Category']); values.append(row['Value'])
-                            
-                            # [핵심] 상대적 비율로 색상 결정
                             color_hex = get_relative_color(row['Value'], max_frequency)
                             colors.append(color_hex)
-                            
                             text_colors.append("#FFFFFF")
                             display_texts.append(f"{row['Keyword']}")
 
                         fig_tree = go.Figure(go.Treemap(
                             labels=labels, parents=parents, values=values,
-                            
-                            # [핵심] 950번 색상(진한 남색)으로 카드 간격 프레임 생성
                             marker=dict(colors=colors, line=dict(width=8, color=PURPLE_PALETTE[950])),
-                            
                             text=display_texts, 
                             textinfo="text",
                             textfont=dict(family="Pretendard", color=text_colors, size=20),
