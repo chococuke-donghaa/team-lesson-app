@@ -21,9 +21,6 @@ PURPLE_PALETTE = {
     800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
 }
 
-# [삭제] 기존의 카테고리별 색상 테마(CATEGORY_THEMES)는 더 이상 쓰지 않으므로 삭제하거나 무시합니다.
-# 대신 빈도수에 따른 색상 함수를 아래에서 사용합니다.
-
 def get_connection():
     return st.connection("gsheets", type=GSheetsConnection)
 
@@ -287,19 +284,17 @@ with tab1:
                 except: kw_list = []
                 kw_str = "  ".join([f"#{k}" for k in kw_list])
                 
-                # 하단 뱃지: 기본 보라색(800)으로 통일 (대시보드는 빈도수 기반, 여기는 깔끔하게)
                 st.markdown(f"""<div style="margin-top: 20px; display: flex; align-items: center; gap: 10px;"><span style="background-color: {PURPLE_PALETTE[800]}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{row['category']}</span><span style="color: {PURPLE_PALETTE[400]}; font-size: 0.9rem;">{kw_str}</span></div>""", unsafe_allow_html=True)
                 st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
     else:
         st.info("아직 기록된 내용이 없습니다.")
 
-# [NEW] 빈도수에 따른 색상 계산 함수
 def get_color_by_value(val):
-    if val <= 1: return PURPLE_PALETTE[400]      # 1번 등장: 연함
-    elif val == 2: return PURPLE_PALETTE[500]    # 2번 등장: 보통
-    elif val <= 4: return PURPLE_PALETTE[700]    # 3~4번 등장: 진함
-    else: return PURPLE_PALETTE[900]             # 5번 이상: 매우 진함 (Hot Topic)
+    if val <= 1: return PURPLE_PALETTE[400]      
+    elif val == 2: return PURPLE_PALETTE[500]    
+    elif val <= 4: return PURPLE_PALETTE[700]    
+    else: return PURPLE_PALETTE[900]             
 
 with tab2:
     df = load_data()
@@ -334,25 +329,26 @@ with tab2:
                         tree_df = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
                         labels, parents, values, colors, text_colors, display_texts = [], [], [], [], [], []
                         
-                        # 카테고리 처리
+                        # 카테고리 처리: 색상을 950번(가장 진한색)으로 고정
                         categories = tree_df['Category'].unique()
                         for cat in categories:
                             cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
                             labels.append(cat); parents.append(""); values.append(cat_total)
                             
-                            # [핵심] 빈도수(cat_total)에 따라 색상 결정
-                            color_hex = get_color_by_value(cat_total)
-                            colors.append(color_hex)
-                            text_colors.append("#FFFFFF") # 배경이 진할 수 있으므로 항상 흰색
+                            # [핵심] 상위 카테고리는 무조건 950번 색상 사용 (#261A4C)
+                            colors.append(PURPLE_PALETTE[950])
+                            
+                            text_colors.append("#FFFFFF")
                             display_texts.append(f"{cat}")
 
-                        # 키워드 처리
+                        # 키워드 처리: 빈도수에 따라 색상 변화 (400 ~ 900)
                         for idx, row in tree_df.iterrows():
                             labels.append(row['Keyword']); parents.append(row['Category']); values.append(row['Value'])
                             
-                            # [핵심] 빈도수(row['Value'])에 따라 색상 결정
+                            # 하위 키워드는 빈도수에 따라 색상 결정
                             color_hex = get_color_by_value(row['Value'])
                             colors.append(color_hex)
+                            
                             text_colors.append("#FFFFFF")
                             display_texts.append(f"{row['Keyword']}")
 
