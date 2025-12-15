@@ -11,6 +11,7 @@ from streamlit_gsheets import GSheetsConnection
 # -----------------------------------------------------------------------------
 # 1. 설정 및 데이터 관리
 # -----------------------------------------------------------------------------
+# API Key 설정 (Streamlit Secrets 사용 권장)
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
 CARD_BG_COLOR = "#0E1117"
 
@@ -34,8 +35,8 @@ def load_data():
         df.columns = [c.strip().lower() for c in df.columns]
         
         if 'id' not in df.columns:
-            st.error("❌ 구글 시트에 'id' 컬럼이 없습니다. 1행 제목을 확인해주세요.")
-            return pd.DataFrame(columns=["id", "date", "writer", "text", "keywords", "category"])
+            # ID 컬럼이 없으면 임시로 생성 (실제 시트에는 반영 안 됨, 에러 방지용)
+            df['id'] = [str(uuid.uuid4()) for _ in range(len(df))]
 
         if 'date' in df.columns:
             df['date'] = pd.to_datetime(df['date'], errors='coerce')
@@ -53,15 +54,14 @@ def save_data_to_sheet(df):
         save_df['date'] = save_df['date'].dt.strftime('%Y-%m-%d')
     conn.update(data=save_df)
 
-# [수정] categories(리스트)를 받아서 JSON 문자열로 저장
 def save_entry(writer, text, keywords, categories, date_val):
     df = load_data()
     
-    # 카테고리가 리스트인지 확인하고 JSON 변환
+    # 카테고리 리스트를 JSON 문자열로 변환하여 저장
     if isinstance(categories, list):
         cat_str = json.dumps(categories, ensure_ascii=False)
     else:
-        cat_str = json.dumps([categories], ensure_ascii=False)
+        cat_str = json.dumps([str(categories)], ensure_ascii=False)
 
     new_data = pd.DataFrame({
         "id": [str(uuid.uuid4())],
@@ -69,7 +69,7 @@ def save_entry(writer, text, keywords, categories, date_val):
         "writer": [writer],
         "text": [text],
         "keywords": [json.dumps(keywords, ensure_ascii=False)],
-        "category": [cat_str] # JSON 문자열로 저장
+        "category": [cat_str] 
     })
     df = pd.concat([df, new_data], ignore_index=True)
     save_data_to_sheet(df)
@@ -81,7 +81,7 @@ def update_entry(entry_id, writer, text, keywords, categories, date_val):
     if isinstance(categories, list):
         cat_str = json.dumps(categories, ensure_ascii=False)
     else:
-        cat_str = json.dumps([categories], ensure_ascii=False)
+        cat_str = json.dumps([str(categories)], ensure_ascii=False)
 
     if not idx.empty:
         df.at[idx[0], 'writer'] = writer
@@ -96,15 +96,33 @@ def delete_entry(entry_id):
     df = df[df['id'] != entry_id]
     save_data_to_sheet(df)
 
-# [NEW] 카테고리 데이터 파싱 헬퍼 함수 (구버전 데이터 호환용)
+# [핵심 수정] 카테고리 데이터 파싱 함수 (구버전/신버전/오류 호환)
 def parse_categories(cat_data):
     try:
-        # JSON 형식의 리스트 문자열인 경우 (예: '["기획", "디자인"]')
-        if cat_data.strip().startswith("["):
-            return json.loads(cat_data)
-        # 그냥 문자열인 경우 (예: "기획") -> 리스트로 감싸서 반환
-        else:
-            return [cat_data] if cat_data else ["기타"]
+        if not cat_data or pd.isna(cat_data):
+            return ["기타"]
+        
+        # 문자열로 변환
+        cat_str = str(cat_data).strip()
+        
+        # 1. JSON 리스트 형식인 경우 (예: '["기획", "디자인"]')
+        if cat_str.startswith("[") and cat_str.endswith("]"):
+            try:
+                parsed = json.loads(cat_str)
+                if isinstance(parsed, list):
+                    return parsed
+                return [str(parsed)]
+            except json.JSONDecodeError:
+                # 파싱 실패시 대괄호 제거 후 처리
+                pass
+        
+        # 2. 쉼표로 구분된 문자열인 경우 (예: "기획, 디자인")
+        if "," in cat_str:
+            return [x.strip().replace('[','').replace(']','').replace('"','').replace("'", "") for x in cat_str.split(",")]
+            
+        # 3. 단순 문자열인 경우 (예: "기획")
+        clean_str = cat_str.replace('[','').replace(']','').replace('"','').replace("'", "")
+        return [clean_str] if clean_str else ["기타"]
     except:
         return ["기타"]
 
@@ -125,21 +143,20 @@ def analyze_text(text):
         
         model = genai.GenerativeModel(model_name)
         
-        # [수정] 다중 카테고리 요청 프롬프트
         prompt = f"""
         너는 팀의 레슨런(Lesson Learned)을 분류하는 데이터 관리자야.
         입력된 텍스트를 분석해서 다음 규칙에 맞춰 JSON으로 응답해.
 
         [키워드 작성 규칙]
         1. keywords: 총 2~3개의 키워드를 배열로 작성.
-           - 데이터 그룹핑을 위해 '기획', '개발', '디자인', '협업', '프로세스' 같은 표준 단어가 있다면 첫 번째 키워드로 넣어줘.
-           - 없다면 본문을 잘 설명하는 핵심 단어를 넣어줘.
+           - '기획', '개발', '디자인', 'QA', '배포' 같은 업무 단계나 속성이 있다면 포함해줘.
+           - 본문을 잘 설명하는 핵심 명사 위주로 작성해줘.
            
         [카테고리 작성 규칙]
-        2. categories: **텍스트의 성격을 나타내는 명사형 단어들을 배열(Array)로** 작성해.
-           - **중요:** 하나의 글이 여러 속성을 가질 수 있어. (예: ["기획", "디자인"], ["개발", "배포", "프로세스"])
-           - 1개여도 되지만, 내용이 복합적이라면 2~3개까지 작성 가능해.
-           - 예시: 기획, 개발, 디자인, 협업, 프로세스, 마케팅, 비즈니스, HR, 복지 등 제한 없음.
+        2. categories: 텍스트의 성격을 나타내는 대분류를 배열(Array)로 작성해.
+           - **중요:** 하나의 글이 여러 속성을 가질 수 있어. (예: ["기획", "디자인"], ["개발", "프로세스"])
+           - 추천 카테고리: 기획, 디자인, 개발, QA, 배포, 프로세스, 커뮤니케이션, 인사이트, 버그, 기타
+           - 최대 3개까지 선택 가능.
 
         [응답 형식 (JSON)]
         {{
@@ -153,11 +170,13 @@ def analyze_text(text):
         text_resp = response.text.replace("```json", "").replace("```", "").strip()
         result = json.loads(text_resp)
         
-        # categories 키로 받음
         cats = result.get("categories", ["기타"])
-        if isinstance(cats, str): cats = [cats] # 혹시 문자열로 오면 리스트로 변환
+        if isinstance(cats, str): cats = [cats]
         
-        return result.get("keywords", ["분석불가"]), cats
+        kws = result.get("keywords", ["분석불가"])
+        if isinstance(kws, str): kws = [kws]
+
+        return kws, cats
     except Exception as e:
         return ["AI연동실패"], ["기타"]
 
@@ -192,6 +211,7 @@ def confirm_delete_dialog(entry_id):
         if st.button("취소", use_container_width=True):
             st.rerun()
 
+# CSS 스타일 적용
 st.markdown(f"""
     <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
@@ -213,6 +233,7 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
+# 헤더 영역
 col_head1, col_head2 = st.columns([5, 1])
 with col_head1:
     st.title("Team Lesson Learned 🚀")
@@ -228,6 +249,9 @@ with col_head2:
 
 tab1, tab2 = st.tabs(["📝 배움 기록하기", "📊 통합 대시보드"])
 
+# -----------------------------------------------------------------------------
+# TAB 1: 기록하기 및 조회
+# -----------------------------------------------------------------------------
 with tab1:
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
@@ -264,8 +288,9 @@ with tab1:
             if not writer or not text:
                 st.error("내용을 입력해주세요.")
             else:
-                with st.spinner("✨ AI 분석 중..."):
-                    keywords, categories = analyze_text(text) # 리스트 반환
+                with st.spinner("✨ AI가 내용을 분석하고 태그를 생성하고 있어요..."):
+                    keywords, categories = analyze_text(text)
+                    
                     if st.session_state['edit_mode']:
                         update_entry(st.session_state['edit_data']['id'], writer, text, keywords, categories, selected_date)
                         st.success("✅ 수정 완료!")
@@ -274,10 +299,11 @@ with tab1:
                         st.rerun()
                     else:
                         save_entry(writer, text, keywords, categories, selected_date)
-                        st.success(f"✅ 저장 완료! ({', '.join(categories)})")
+                        st.success(f"✅ 저장 완료! (태그: {', '.join(categories)})")
 
     st.markdown("---")
     
+    # 목록 조회 영역
     df = load_data()
     c_title, c_filter1, c_filter2 = st.columns([2, 1, 1], gap="small")
     with c_title: st.subheader("📜 이전 기록 참고하기")
@@ -312,22 +338,27 @@ with tab1:
                 st.markdown(f'<hr style="border: 0; border-top: 1px solid #30333F; margin: 5px 0 15px 0;">', unsafe_allow_html=True)
                 st.markdown(row['text'])
                 
+                # 키워드 처리
                 try: kw_list = json.loads(row['keywords'])
                 except: kw_list = []
+                if not isinstance(kw_list, list): kw_list = [str(kw_list)]
                 kw_str = "  ".join([f"#{k}" for k in kw_list])
                 
-                # [수정] 카테고리 여러개 표시 로직
+                # 카테고리 처리 (다중 뱃지)
                 cats = parse_categories(row['category'])
                 cat_badges = ""
                 for c in cats:
                      cat_badges += f'<span style="background-color: {PURPLE_PALETTE[800]}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; margin-right: 5px;">{c}</span>'
 
-                st.markdown(f"""<div style="margin-top: 20px; display: flex; align-items: center; gap: 5px;">{cat_badges}<span style="color: {PURPLE_PALETTE[400]}; font-size: 0.9rem; margin-left: 5px;">{kw_str}</span></div>""", unsafe_allow_html=True)
+                st.markdown(f"""<div style="margin-top: 20px; display: flex; align-items: center; flex-wrap: wrap; gap: 5px;">{cat_badges}<span style="color: {PURPLE_PALETTE[400]}; font-size: 0.9rem; margin-left: 5px;">{kw_str}</span></div>""", unsafe_allow_html=True)
                 st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
     else:
         st.info("아직 기록된 내용이 없습니다.")
 
+# -----------------------------------------------------------------------------
+# TAB 2: 대시보드 (여기가 핵심 수정됨)
+# -----------------------------------------------------------------------------
 def get_relative_color(val, max_val):
     if max_val == 0: return PURPLE_PALETTE[400]
     ratio = val / max_val
@@ -339,7 +370,7 @@ def get_relative_color(val, max_val):
 with tab2:
     df = load_data()
     if not df.empty:
-        # [수정] 통계 계산 시 다중 카테고리 풀어서 계산
+        # 1. 모든 카테고리를 평탄화(Flatten)하여 통계 계산
         all_cats_flat = []
         for c_data in df['category']:
              all_cats_flat.extend(parse_categories(c_data))
@@ -347,11 +378,16 @@ with tab2:
         total = len(df)
         top_cat = pd.Series(all_cats_flat).mode()[0] if all_cats_flat else "-"
         top_writer = df['writer'].mode()[0] if not df['writer'].empty else "-"
-        try:
-            all_kws = []
-            for k in df['keywords']: all_kws.extend(json.loads(k))
-        except: all_kws = []
         
+        all_kws = []
+        for k in df['keywords']: 
+            try:
+                loaded = json.loads(k)
+                if isinstance(loaded, list): all_kws.extend(loaded)
+                else: all_kws.append(str(loaded))
+            except: pass
+        
+        # 상단 지표
         row1_col1, row1_col2 = st.columns([1, 3])
         with row1_col1:
             st.subheader("Key Metrics")
@@ -363,64 +399,93 @@ with tab2:
         with row1_col2:
             st.subheader("🗺️ Keyword Map (키워드 맵)")
             with st.container(border=True):
-                if all_kws:
-                    tree_data = []
-                    for idx, row in df.iterrows():
-                        try: kws = json.loads(row['keywords'])
-                        except: kws = []
-                        # [핵심] 다중 카테고리 처리: 카테고리 리스트를 순회하며 모두 추가
-                        cats = parse_categories(row['category'])
-                        for c in cats:
-                            for k in kws: 
-                                tree_data.append({'Category': c, 'Keyword': k, 'Value': 1})
+                # 트리맵 데이터 생성 로직 강화
+                tree_data = []
+                for idx, row in df.iterrows():
+                    # 키워드 파싱
+                    try: 
+                        kws = json.loads(row['keywords'])
+                        if not isinstance(kws, list): kws = [str(kws)]
+                    except: kws = []
                     
-                    if tree_data:
-                        tree_df = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
-                        
-                        max_frequency = tree_df['Value'].max() if not tree_df.empty else 1
-                        
-                        labels, parents, values, colors, text_colors, display_texts = [], [], [], [], [], []
-                        
-                        categories = tree_df['Category'].unique()
-                        for cat in categories:
-                            cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
-                            labels.append(cat); parents.append(""); values.append(cat_total)
-                            
-                            colors.append(PURPLE_PALETTE[950])
-                            text_colors.append("#FFFFFF")
-                            display_texts.append(f"{cat}")
+                    # 키워드가 비어있을 경우 처리 (중요: 그래야 카테고리라도 표시됨)
+                    if not kws: kws = ["General"]
 
-                        for idx, row in tree_df.iterrows():
-                            labels.append(row['Keyword']); parents.append(row['Category']); values.append(row['Value'])
-                            
-                            color_hex = get_relative_color(row['Value'], max_frequency)
-                            colors.append(color_hex)
-                            text_colors.append("#FFFFFF")
-                            display_texts.append(f"{row['Keyword']}")
+                    # 카테고리 파싱
+                    cats = parse_categories(row['category'])
+                    
+                    # 데이터 전개
+                    for c in cats:
+                        for k in kws: 
+                            if k and c: # 빈 문자열 방지
+                                tree_data.append({'Category': c, 'Keyword': k, 'Value': 1})
+                
+                if tree_data:
+                    tree_df = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
+                    
+                    max_frequency = tree_df['Value'].max() if not tree_df.empty else 1
+                    
+                    labels, parents, values, colors, text_colors, display_texts = [], [], [], [], [], []
+                    
+                    # 부모 노드 (카테고리) 추가
+                    categories = tree_df['Category'].unique()
+                    for cat in categories:
+                        cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
+                        labels.append(cat)
+                        parents.append("")
+                        values.append(cat_total)
+                        colors.append(PURPLE_PALETTE[950])
+                        text_colors.append("#FFFFFF")
+                        display_texts.append(f"{cat}")
 
-                        fig_tree = go.Figure(go.Treemap(
-                            labels=labels, parents=parents, values=values,
-                            marker=dict(colors=colors, line=dict(width=8, color=PURPLE_PALETTE[950])),
-                            text=display_texts, 
-                            textinfo="text",
-                            textfont=dict(family="Pretendard", color=text_colors, size=20),
-                            branchvalues="total", pathbar=dict(visible=False), textposition="middle center" 
-                        ))
-                        fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=520, paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
-                        st.plotly_chart(fig_tree, use_container_width=True)
-                else: st.info("데이터가 부족합니다.")
+                    # 자식 노드 (키워드) 추가
+                    for idx, row in tree_df.iterrows():
+                        # Plotly Treemap은 Label이 유니크해야 형제 노드간 구분이 명확하나, 
+                        # 여기서는 단순화를 위해 중복 허용 구조로 감 (부모가 다르면 괜찮음)
+                        labels.append(row['Keyword'])
+                        parents.append(row['Category'])
+                        values.append(row['Value'])
+                        
+                        color_hex = get_relative_color(row['Value'], max_frequency)
+                        colors.append(color_hex)
+                        text_colors.append("#FFFFFF")
+                        display_texts.append(f"{row['Keyword']}")
+
+                    fig_tree = go.Figure(go.Treemap(
+                        labels=labels, 
+                        parents=parents, 
+                        values=values,
+                        marker=dict(colors=colors, line=dict(width=2, color=CARD_BG_COLOR)),
+                        text=display_texts, 
+                        textinfo="text",
+                        textfont=dict(family="Pretendard", color=text_colors, size=16),
+                        branchvalues="total", 
+                        pathbar=dict(visible=False), 
+                        textposition="middle center" 
+                    ))
+                    fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=520, paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
+                    st.plotly_chart(fig_tree, use_container_width=True)
+                else:
+                    st.info("시각화할 데이터가 충분하지 않습니다.")
+
         st.markdown("---")
+        
         col_chart1, col_chart2 = st.columns(2)
         with col_chart1:
             st.subheader("📊 카테고리 비중")
             with st.container(border=True):
-                # [수정] 파이차트도 다중 카테고리 반영
-                cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
-                cat_counts.columns = ['category', 'count']
-                
-                fig_pie = px.pie(cat_counts, values='count', names='category', hole=0.6, color_discrete_sequence=[PURPLE_PALETTE[i] for i in [500, 600, 700, 800, 900, 400]])
-                fig_pie.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=350, paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
-                st.plotly_chart(fig_pie, use_container_width=True)
+                # 파이차트: 평탄화된 카테고리 리스트 사용
+                if all_cats_flat:
+                    cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
+                    cat_counts.columns = ['category', 'count']
+                    
+                    fig_pie = px.pie(cat_counts, values='count', names='category', hole=0.6, 
+                                     color_discrete_sequence=[PURPLE_PALETTE[i] for i in [500, 600, 700, 800, 900, 400]])
+                    fig_pie.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=350, paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                else:
+                    st.info("데이터가 없습니다.")
+
         with col_chart2:
             st.subheader("🏆 Top 키워드")
             with st.container(border=True):
