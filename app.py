@@ -368,3 +368,38 @@ with tab2:
                     fig_bar.update_layout(xaxis=dict(showgrid=False, visible=False), yaxis=dict(showgrid=False, autorange="reversed"), margin=dict(t=20, b=20, l=10, r=40), height=350, paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
                     st.plotly_chart(fig_bar, use_container_width=True)
     else: st.info("데이터가 없습니다.")
+
+## AI연동 확인 키트
+
+import streamlit as st
+import google.generativeai as genai
+
+st.title("🏥 AI 연결 진단 키트")
+
+# 1. API 키 확인
+api_key = st.secrets.get("GOOGLE_API_KEY")
+
+if not api_key:
+    st.error("❌ Secrets에 'GOOGLE_API_KEY'가 없습니다. 스펠링을 확인해주세요.")
+else:
+    st.success("✅ API 키를 Secrets에서 찾았습니다!")
+    
+    # 2. 라이브러리 및 모델 연결 시도
+    try:
+        genai.configure(api_key=api_key)
+        
+        st.write("📡 구글 AI 서버와 통신을 시도합니다...")
+        model = genai.GenerativeModel("gemini-1.5-flash") # 또는 gemini-pro
+        
+        # 3. 실제 대화 시도
+        response = model.generate_content("안녕? 연결됐니?")
+        
+        if response.text:
+            st.success(f"🎉 연결 성공! AI 응답: {response.text}")
+            st.balloons()
+        else:
+            st.warning("연결은 된 것 같은데, 응답이 비어있습니다.")
+            
+    except Exception as e:
+        st.error("🚨 연결 실패! 아래 에러 메시지를 확인하세요.")
+        st.code(str(e)) # 여기에 뜨는 영어 메시지가 진짜 원인입니다.
