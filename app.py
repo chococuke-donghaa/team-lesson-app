@@ -15,11 +15,10 @@ from streamlit_gsheets import GSheetsConnection
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
 CARD_BG_COLOR = "#0E1117"
 
-# [수정됨] 실제 사용 가능한 모델로 리스트 재구성 (쿼터 초과 시 다음 모델로 자동 전환)
 MODEL_PRIORITY_LIST = [
-    "gemini-2.5-flash",       # 1순위: 메인 모델
-    "gemini-2.5-flash-lite",  # 2순위: 쿼터 여유 모델
-    "gemini-1.5-flash"        # 3순위: 안정적인 구형 모델
+    "gemini-2.5-flash",       
+    "gemini-2.5-flash-lite",  
+    "gemini-1.5-flash"        
 ]
 
 DEFAULT_CATEGORIES = [
@@ -34,7 +33,7 @@ PURPLE_PALETTE = {
     800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
 }
 
-# [에러 해결] NameError 방지를 위해 최상단에 정의
+# [필수] 색상 계산 함수
 def get_relative_color(val, max_val):
     if max_val == 0: return PURPLE_PALETTE[400]
     ratio = val / max_val
@@ -128,12 +127,11 @@ def parse_categories(cat_data):
     except: return ["기타"]
 
 # -----------------------------------------------------------------------------
-# 2. AI 분석 (자동 모델 전환)
+# 2. AI 분석
 # -----------------------------------------------------------------------------
 def analyze_text(text):
     genai.configure(api_key=GOOGLE_API_KEY)
     
-    # 모델 리스트 순회 (Fallback Logic)
     for model_name in MODEL_PRIORITY_LIST:
         try:
             model = genai.GenerativeModel(model_name)
@@ -170,7 +168,7 @@ def analyze_text(text):
 
         except Exception as e:
             print(f"⚠️ {model_name} failed: {e}")
-            time.sleep(1) # 짧은 대기 후 다음 모델 시도
+            time.sleep(1) 
             continue
     
     return ["#AI오류"], ["기타"], "None"
@@ -219,7 +217,14 @@ st.markdown(f"""
     div[data-testid="stMetricLabel"] {{ color: #9CA3AF !important; }}
     div[data-testid="stMetricValue"] {{ color: white !important; font-weight: 700 !important; }}
     
-    button[kind="secondary"] {{ padding: 4px 10px; font-size: 0.85rem; }}
+    /* 카드 스타일 (상세보기용) */
+    .detail-card {{
+        background-color: {CARD_BG_COLOR};
+        border: 1px solid #30333F;
+        border-radius: 10px;
+        padding: 20px;
+        margin-bottom: 10px;
+    }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -347,7 +352,7 @@ with tab1:
     else:
         st.info("아직 기록된 내용이 없습니다.")
 
-# --- TAB 2: 대시보드 ---
+# --- TAB 2: 대시보드 (수정됨) ---
 with tab2:
     df = load_data()
     if not df.empty:
@@ -373,10 +378,11 @@ with tab2:
             st.metric("최다 작성자", top_writer)
 
         with row1_col2:
-            st.subheader("🗺️ Category Map")
+            st.subheader("🗺️ Category Map (배움의 영역)")
+            st.caption("🔍 카테고리 박스를 클릭하면, 하단에 관련 내용이 표시됩니다.")
+            
             with st.container(border=True):
                 if all_cats_flat:
-                    # [수정됨] 키워드를 제거하고 카테고리만 카운트하여 단순화
                     cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
                     cat_counts.columns = ['Category', 'Value']
                     
@@ -384,10 +390,9 @@ with tab2:
                         max_frequency = cat_counts['Value'].max()
                         
                         labels = cat_counts['Category'].tolist()
-                        parents = [""] * len(labels) # 부모 노드 없음 (1단계 평면)
+                        parents = [""] * len(labels)
                         values = cat_counts['Value'].tolist()
                         
-                        # 색상 매핑 (많을수록 진하게)
                         colors = [get_relative_color(v, max_frequency) for v in values]
                         text_colors = ["#FFFFFF"] * len(labels)
 
@@ -396,13 +401,61 @@ with tab2:
                             marker=dict(colors=colors, line=dict(width=2, color=CARD_BG_COLOR)),
                             textinfo="label+value",
                             textfont=dict(family="Pretendard", color=text_colors, size=20),
-                            branchvalues="total"
+                            branchvalues="total",
+                            hovertemplate='<b>%{label}</b><br>기록 수: %{value}<extra></extra>'
                         ))
-                        fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=500, paper_bgcolor=CARD_BG_COLOR)
-                        st.plotly_chart(fig_tree, use_container_width=True)
+                        fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=400, paper_bgcolor=CARD_BG_COLOR)
+                        
+                        # [핵심] on_select="rerun"을 사용하여 클릭 이벤트 활성화
+                        event = st.plotly_chart(fig_tree, use_container_width=True, on_select="rerun")
                     else:
-                        st.info("시각화할 카테고리 데이터가 없습니다.")
-                else: st.info("데이터가 부족합니다.")
+                        st.info("데이터가 없습니다.")
+                        event = None
+                else: 
+                    st.info("데이터가 부족합니다.")
+                    event = None
+        
+        # --- [추가 기능] 클릭 시 상세 내용 보여주기 (Drill-Down) ---
+        st.markdown("---")
+        
+        selected_category = None
+        # 클릭 이벤트 파싱: 포인트가 선택되었다면 해당 라벨(카테고리명)을 가져옴
+        if event and event.selection and event.selection.points:
+            selected_category = event.selection.points[0].get("label")
+        
+        if selected_category:
+            st.subheader(f"📂 '{selected_category}' 카테고리의 레슨런")
+            
+            # 해당 카테고리가 포함된 행만 필터링
+            # (각 행의 'category'는 JSON 문자열이므로 파싱해서 확인)
+            filtered_df = df[df['category'].apply(lambda x: selected_category in parse_categories(x))]
+            
+            if not filtered_df.empty:
+                filtered_df = filtered_df.sort_values(by="date", ascending=False)
+                for idx, row in filtered_df.iterrows():
+                    with st.container(border=True):
+                        # 상단: 날짜 | 작성자
+                        date_str = row['date'].strftime('%Y-%m-%d') if isinstance(row['date'], pd.Timestamp) else str(row['date'])[:10]
+                        st.markdown(f"**{row['writer']}** | <span style='color:#9CA3AF'>{date_str}</span>", unsafe_allow_html=True)
+                        st.markdown(f'<hr style="border: 0; border-top: 1px solid #30333F; margin: 5px 0 10px 0;">', unsafe_allow_html=True)
+                        
+                        # 본문
+                        st.markdown(row['text'])
+                        
+                        # 하단: 태그들
+                        cats = parse_categories(row['category'])
+                        cat_badges = ""
+                        for c in cats:
+                            # 선택된 카테고리는 강조색, 나머지는 기본색
+                            bg_color = PURPLE_PALETTE[800] if c == selected_category else "#30333F"
+                            cat_badges += f'<span style="background-color: {bg_color}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.75rem; margin-right: 5px;">{c}</span>'
+                        
+                        st.markdown(f"<div style='margin-top:10px;'>{cat_badges}</div>", unsafe_allow_html=True)
+            else:
+                st.info("해당 카테고리의 글을 찾을 수 없습니다.")
+        else:
+            # 선택되지 않았을 때 안내 문구
+            st.info("👆 위 차트에서 **카테고리 박스를 클릭**하면, 여기에 관련 글 목록이 나타납니다.")
 
         st.markdown("---")
         
@@ -410,7 +463,6 @@ with tab2:
         with col_chart1:
             st.subheader("📊 카테고리 비중")
             with st.container(border=True):
-                # 파이 차트는 비율을 보기 좋음
                 cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
                 cat_counts.columns = ['category', 'count']
                 
@@ -420,9 +472,8 @@ with tab2:
                 st.plotly_chart(fig_pie, use_container_width=True)
                 
         with col_chart2:
-            st.subheader("🏆 Top 키워드 (해시태그)")
+            st.subheader("🏆 Top 키워드")
             with st.container(border=True):
-                # 키워드는 여기서만 바 차트로 보여주기
                 if all_kws:
                     kw_counts = pd.Series(all_kws).value_counts().head(10).reset_index()
                     kw_counts.columns = ['keyword', 'count']
