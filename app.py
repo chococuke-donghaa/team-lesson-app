@@ -46,7 +46,7 @@ def load_data(force_reload=False):
         return df
     except Exception as e:
         if "Quota" in str(e) or "429" in str(e):
-            st.error("🚨 구글 시트 요청량이 너무 많습니다. 잠시(1~2분) 뒤에 다시 시도해주세요.")
+            st.error("🚨 구글 시트 요청량이 너무 많습니다. 1~2분 뒤에 다시 시도해주세요.")
         else:
             st.error(f"데이터 로드 실패: {e}")
         return pd.DataFrame(columns=["id", "date", "writer", "text", "keywords", "category"])
@@ -109,19 +109,19 @@ def parse_json_list(data_str):
         return [clean_s] if clean_s else []
     except: return []
 
-def get_available_model():
-    try:
-        genai.configure(api_key=GOOGLE_API_KEY)
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods: return m.name
-        return None
-    except: return None
-
+# [수정] AI 분석 함수: 모델명을 'gemini-pro'로 변경하여 호환성 확보
 def analyze_text(text):
     try:
-        model_name = get_available_model()
-        if not model_name: return ["AI연동실패"], "기타"
-        model = genai.GenerativeModel(model_name)
+        # API 키 확인
+        if not GOOGLE_API_KEY or GOOGLE_API_KEY == "YOUR_API_KEY":
+            st.error("🚨 API 키가 설정되지 않았습니다. secrets.toml을 확인하세요.")
+            return ["키설정오류"], "기타"
+
+        genai.configure(api_key=GOOGLE_API_KEY)
+        
+        # [핵심 수정] 1.5-flash 대신 가장 안정적인 'gemini-pro' 사용
+        model = genai.GenerativeModel("gemini-pro") 
+
         prompt = f"""
         너는 팀의 레슨런을 분류하는 관리자야. 텍스트를 분석해서 JSON으로 답해줘.
         1. keywords: 핵심 단어 2~3개 (Array)
@@ -129,13 +129,18 @@ def analyze_text(text):
         [형식] {{"keywords": ["키워드1"], "category": "카테고리명"}}
         텍스트: {text}
         """
+        
         response = model.generate_content(prompt)
         text_resp = response.text.replace("```json", "").replace("```", "").strip()
         result = json.loads(text_resp)
         cat = result.get("category", "기타")
         if isinstance(cat, list): cat = cat[0] if cat else "기타"
+        
         return result.get("keywords", ["분석불가"]), cat
-    except: return ["AI연동실패"], "기타"
+
+    except Exception as e:
+        st.error(f"💥 AI 분석 에러: {str(e)}")
+        return ["AI연동실패"], "기타"
 
 def get_month_week_str(date_obj):
     try:
@@ -190,39 +195,47 @@ with col_head1:
     st.title("Team Lesson Learned 🚀")
     st.caption("팀의 배움을 기록하고 공유하는 아카이브")
 with col_head2:
-    if get_available_model():
-        st.markdown(f'<div style="text-align: right;"><span class="ai-status-ok">🟢 AI 연동됨</span></div>', unsafe_allow_html=True)
+    if GOOGLE_API_KEY and GOOGLE_API_KEY != "YOUR_API_KEY":
+        st.markdown(f'<div style="text-align: right;"><span class="ai-status-ok">🟢 AI 연결됨 (Key Found)</span></div>', unsafe_allow_html=True)
     else:
-        st.markdown(f'<div style="text-align: right;"><span class="ai-status-fail">🔴 AI 미연동</span></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="text-align: right;"><span class="ai-status-fail">🔴 AI 미설정</span></div>', unsafe_allow_html=True)
 
 tab1, tab2 = st.tabs(["📝 배움 기록하기", "📊 통합 대시보드"])
 
 with tab1:
+    # [수정 완료] 모든 조건에서 변수가 초기화되도록 수정하여 NameError 방지
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
-        st.info("수정 중인 모드입니다.")
-        if st.button("취소하고 새 글 쓰기"):
+        if st.button("취소"):
             st.session_state['edit_mode'] = False; st.session_state['edit_data'] = {}; st.rerun()
+        
+        # 수정 모드: 기존 데이터 로드
         form_writer = st.session_state['edit_data'].get('writer', '')
         form_text = st.session_state['edit_data'].get('text', '')
         d_val = st.session_state['edit_data'].get('date')
         form_date = d_val.date() if isinstance(d_val, pd.Timestamp) else datetime.datetime.now().date()
     else:
-        # [수정됨] 변수명을 form_* 으로 통일하여 오류 해결
-        form_writer = ""; form_text = ""; form_date = datetime.datetime.now().date()
+        # 새 글 모드: 빈 값 설정
+        st.subheader("이번주의 레슨런을 기록해주세요")
+        form_writer = ""
+        form_text = ""
+        form_date = datetime.datetime.now().date()
 
     with st.form("record_form", clear_on_submit=True):
         c_input1, c_input2 = st.columns([1, 1])
-        with c_input1: writer = st.text_input("작성자", value=form_writer)
+        with c_input1: writer = st.text_input("작성자", value=form_writer, placeholder="이름 입력")
         with c_input2: selected_date = st.date_input("날짜", value=form_date)
         text = st.text_area("내용 (Markdown 지원)", value=form_text, height=150)
+        
         submitted = st.form_submit_button("수정 완료" if st.session_state['edit_mode'] else "기록 저장하기", use_container_width=True)
         
         if submitted:
             if not writer or not text: st.error("내용을 입력해주세요.")
             else:
                 with st.spinner("✨ AI 분석 중..."):
+                    # 여기서 에러가 나면 화면에 붉은 박스로 표시됨
                     keywords, category = analyze_text(text)
+                    
                     if st.session_state['edit_mode']:
                         update_entry(st.session_state['edit_data']['id'], writer, text, keywords, category, selected_date)
                         st.success("✅ 수정 완료!"); st.session_state['edit_mode'] = False; st.session_state['edit_data'] = {}; st.rerun()
@@ -368,38 +381,3 @@ with tab2:
                     fig_bar.update_layout(xaxis=dict(showgrid=False, visible=False), yaxis=dict(showgrid=False, autorange="reversed"), margin=dict(t=20, b=20, l=10, r=40), height=350, paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
                     st.plotly_chart(fig_bar, use_container_width=True)
     else: st.info("데이터가 없습니다.")
-
-## AI연동 확인 키트
-
-import streamlit as st
-import google.generativeai as genai
-
-st.title("🏥 AI 연결 진단 키트")
-
-# 1. API 키 확인
-api_key = st.secrets.get("GOOGLE_API_KEY")
-
-if not api_key:
-    st.error("❌ Secrets에 'GOOGLE_API_KEY'가 없습니다. 스펠링을 확인해주세요.")
-else:
-    st.success("✅ API 키를 Secrets에서 찾았습니다!")
-    
-    # 2. 라이브러리 및 모델 연결 시도
-    try:
-        genai.configure(api_key=api_key)
-        
-        st.write("📡 구글 AI 서버와 통신을 시도합니다...")
-        model = genai.GenerativeModel("gemini-1.5-flash") # 또는 gemini-pro
-        
-        # 3. 실제 대화 시도
-        response = model.generate_content("안녕? 연결됐니?")
-        
-        if response.text:
-            st.success(f"🎉 연결 성공! AI 응답: {response.text}")
-            st.balloons()
-        else:
-            st.warning("연결은 된 것 같은데, 응답이 비어있습니다.")
-            
-    except Exception as e:
-        st.error("🚨 연결 실패! 아래 에러 메시지를 확인하세요.")
-        st.code(str(e)) # 여기에 뜨는 영어 메시지가 진짜 원인입니다.
