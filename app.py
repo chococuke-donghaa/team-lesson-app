@@ -335,6 +335,10 @@ with tab2:
                     if tree_data:
                         tree_df = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
                         labels, parents, values, colors, text_colors, display_texts = [], [], [], [], [], []
+                        
+                        # [NEW] 폰트 크기 배열 생성
+                        font_sizes = [] 
+
                         categories = tree_df['Category'].unique()
                         for cat in categories:
                             cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
@@ -342,22 +346,26 @@ with tab2:
                             color_indices = CATEGORY_THEMES.get(cat, CATEGORY_THEMES["기타"])
                             colors.append(PURPLE_PALETTE[color_indices[0]])
                             text_colors.append(get_text_color(color_indices[0]))
-                            # [수정] 카테고리(상위) 폰트 크기 증가 (20px -> 26px)
-                            display_texts.append(f"<span style='font-size:26px; font-weight:700;'>{cat}</span>")
+                            display_texts.append(f"{cat}") # HTML 제거 (plain text)
+                            # [핵심] 카테고리(상위)는 크게 (30px)
+                            font_sizes.append(30) 
 
                         for idx, row in tree_df.iterrows():
                             labels.append(row['Keyword']); parents.append(row['Category']); values.append(row['Value'])
                             color_indices = CATEGORY_THEMES.get(row['Category'], CATEGORY_THEMES["기타"])
                             colors.append(PURPLE_PALETTE[color_indices[1]])
                             text_colors.append(get_text_color(color_indices[1]))
-                            # [수정] 키워드(하위) 폰트 크기 축소 (20px -> 16px)
-                            display_texts.append(f"<span style='font-size:16px; font-weight:700;'>{row['Keyword']}</span>")
+                            display_texts.append(f"{row['Keyword']}") # HTML 제거 (plain text)
+                            # [핵심] 키워드(하위)는 작게 (16px)
+                            font_sizes.append(16) 
 
                         fig_tree = go.Figure(go.Treemap(
                             labels=labels, parents=parents, values=values,
                             marker=dict(colors=colors, line=dict(width=2, color=CARD_BG_COLOR)),
-                            text=display_texts, textinfo="text",
-                            textfont=dict(family="Pretendard", color=text_colors),
+                            text=display_texts, 
+                            textinfo="text",
+                            # [핵심] 폰트 크기 배열 적용
+                            textfont=dict(family="Pretendard", color=text_colors, size=font_sizes),
                             branchvalues="total", pathbar=dict(visible=False), textposition="middle center" 
                         ))
                         fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=520, paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
