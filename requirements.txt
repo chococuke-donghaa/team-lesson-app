@@ -1,5 +1,0 @@
-google-generativeai
-streamlit
-pandas
-plotly
-streamlit-gsheets
