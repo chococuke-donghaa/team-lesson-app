@@ -424,3 +424,6 @@ with tab2:
                     fig_bar.update_layout(xaxis=dict(showgrid=False, visible=False), yaxis=dict(showgrid=False, autorange="reversed"), margin=dict(t=20, b=20, l=10, r=40), height=350, paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
                     st.plotly_chart(fig_bar, use_container_width=True)
     else: st.info("데이터가 없습니다.")
+
+model = genai.GenerativeModel('models/gemini-flash-latest')
+print("현재 설정된 모델:", model.model_name) # 터미널에 이 로그가 뜨는지 확인
