@@ -18,9 +18,8 @@ CARD_BG_COLOR = "#0E1117"
 # [핵심] 모델 우선순위 리스트 설정
 # 첫 번째 모델 실패 시 다음 모델로 자동 넘어갑니다.
 MODEL_PRIORITY_LIST = [
-    "gemini-2.0-flash-exp",  # 1순위: 최신 2.0 Flash (속도 빠름) - *사용자 환경에 맞춰 이름 변경 가능
-    "gemini-1.5-flash",      # 2순위: 1.5 Flash (안정적)
-    "gemini-1.5-flash-8b"    # 3순위: Lite급 모델 (가장 가벼움)
+    "gemini-2.5-flash",  # 1순위: 최신 2.0 Flash (속도 빠름) - *사용자 환경에 맞춰 이름 변경 가능
+    "gemini-2.5-flash-lite",      # 2순위: 1.5 Flash (안정적)
 ]
 # 참고: 스크린샷에 있는 'gemini-2.5-flash'가 실제 API 이름이라면 위 리스트를 수정해주세요.
 # 현재 공개된 표준 API 이름은 'gemini-2.0-flash-exp' 또는 'gemini-1.5-flash' 입니다.
