@@ -14,20 +14,15 @@ from streamlit_gsheets import GSheetsConnection
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
 CARD_BG_COLOR = "#0E1117"
 
+# [색상 팔레트]
 PURPLE_PALETTE = {
     50: "#EEEFFF", 100: "#DFE1FF", 200: "#C6C7FF", 300: "#A3A3FE",
     400: "#7E72FA", 500: "#7860F4", 600: "#6A43E8", 700: "#5B35CD",
     800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
 }
 
-# [기존 테마] 여기에 없는 카테고리가 나오면 '기타'와 같은 색상을 씁니다.
-CATEGORY_THEMES = {
-    "기타": (400, 600), "기획": (500, 700), "개발": (600, 800),
-    "디자인": (700, 900), "협업": (500, 700), "프로세스": (600, 800)
-}
-
-def get_text_color(palette_index):
-    return "#FFFFFF"
+# [삭제] 기존의 카테고리별 색상 테마(CATEGORY_THEMES)는 더 이상 쓰지 않으므로 삭제하거나 무시합니다.
+# 대신 빈도수에 따른 색상 함수를 아래에서 사용합니다.
 
 def get_connection():
     return st.connection("gsheets", type=GSheetsConnection)
@@ -107,7 +102,6 @@ def analyze_text(text):
         
         model = genai.GenerativeModel(model_name)
         
-        # [수정] 카테고리 제한 해제 프롬프트
         prompt = f"""
         너는 팀의 레슨런(Lesson Learned)을 분류하는 데이터 관리자야.
         입력된 텍스트를 분석해서 다음 규칙에 맞춰 JSON으로 응답해.
@@ -133,12 +127,7 @@ def analyze_text(text):
         response = model.generate_content(prompt)
         text_resp = response.text.replace("```json", "").replace("```", "").strip()
         result = json.loads(text_resp)
-        
         cat = result.get("category", "기타")
-        
-        # [삭제] 여기에 있던 'if cat not in CATEGORY_THEMES: cat = "기타"' 코드를 지웠습니다.
-        # 이제 AI가 뱉은 카테고리를 그대로 사용합니다.
-        
         return result.get("keywords", ["분석불가"]), cat
     except Exception as e:
         return ["AI연동실패"], "기타"
@@ -298,11 +287,19 @@ with tab1:
                 except: kw_list = []
                 kw_str = "  ".join([f"#{k}" for k in kw_list])
                 
+                # 하단 뱃지: 기본 보라색(800)으로 통일 (대시보드는 빈도수 기반, 여기는 깔끔하게)
                 st.markdown(f"""<div style="margin-top: 20px; display: flex; align-items: center; gap: 10px;"><span style="background-color: {PURPLE_PALETTE[800]}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{row['category']}</span><span style="color: {PURPLE_PALETTE[400]}; font-size: 0.9rem;">{kw_str}</span></div>""", unsafe_allow_html=True)
                 st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
     else:
         st.info("아직 기록된 내용이 없습니다.")
+
+# [NEW] 빈도수에 따른 색상 계산 함수
+def get_color_by_value(val):
+    if val <= 1: return PURPLE_PALETTE[400]      # 1번 등장: 연함
+    elif val == 2: return PURPLE_PALETTE[500]    # 2번 등장: 보통
+    elif val <= 4: return PURPLE_PALETTE[700]    # 3~4번 등장: 진함
+    else: return PURPLE_PALETTE[900]             # 5번 이상: 매우 진함 (Hot Topic)
 
 with tab2:
     df = load_data()
@@ -337,26 +334,26 @@ with tab2:
                         tree_df = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
                         labels, parents, values, colors, text_colors, display_texts = [], [], [], [], [], []
                         
+                        # 카테고리 처리
                         categories = tree_df['Category'].unique()
                         for cat in categories:
                             cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
                             labels.append(cat); parents.append(""); values.append(cat_total)
                             
-                            # [핵심] 새로운 카테고리가 나오면 '기타' 색상을 기본값으로 사용 (에러 방지)
-                            color_indices = CATEGORY_THEMES.get(cat, CATEGORY_THEMES["기타"])
-                            
-                            colors.append(PURPLE_PALETTE[color_indices[0]])
-                            text_colors.append(get_text_color(color_indices[0]))
+                            # [핵심] 빈도수(cat_total)에 따라 색상 결정
+                            color_hex = get_color_by_value(cat_total)
+                            colors.append(color_hex)
+                            text_colors.append("#FFFFFF") # 배경이 진할 수 있으므로 항상 흰색
                             display_texts.append(f"{cat}")
 
+                        # 키워드 처리
                         for idx, row in tree_df.iterrows():
                             labels.append(row['Keyword']); parents.append(row['Category']); values.append(row['Value'])
                             
-                            # [핵심] 키워드도 마찬가지로 안전하게 색상 처리
-                            color_indices = CATEGORY_THEMES.get(row['Category'], CATEGORY_THEMES["기타"])
-                            
-                            colors.append(PURPLE_PALETTE[color_indices[1]])
-                            text_colors.append(get_text_color(color_indices[1]))
+                            # [핵심] 빈도수(row['Value'])에 따라 색상 결정
+                            color_hex = get_color_by_value(row['Value'])
+                            colors.append(color_hex)
+                            text_colors.append("#FFFFFF")
                             display_texts.append(f"{row['Keyword']}")
 
                         fig_tree = go.Figure(go.Treemap(
