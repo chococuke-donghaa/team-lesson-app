@@ -6,16 +6,26 @@ import google.generativeai as genai
 import plotly.express as px
 import plotly.graph_objects as go
 import uuid
+import time
 from streamlit_gsheets import GSheetsConnection
 
 # -----------------------------------------------------------------------------
 # 1. 설정 및 데이터 관리
 # -----------------------------------------------------------------------------
-# [팁] .streamlit/secrets.toml 파일에 GOOGLE_API_KEY가 있어야 합니다.
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
 CARD_BG_COLOR = "#0E1117"
 
-# [설정] 선택 가능한 카테고리 리스트 (multiselect용)
+# [핵심] 모델 우선순위 리스트 설정
+# 첫 번째 모델 실패 시 다음 모델로 자동 넘어갑니다.
+MODEL_PRIORITY_LIST = [
+    "gemini-2.0-flash-exp",  # 1순위: 최신 2.0 Flash (속도 빠름) - *사용자 환경에 맞춰 이름 변경 가능
+    "gemini-1.5-flash",      # 2순위: 1.5 Flash (안정적)
+    "gemini-1.5-flash-8b"    # 3순위: Lite급 모델 (가장 가벼움)
+]
+# 참고: 스크린샷에 있는 'gemini-2.5-flash'가 실제 API 이름이라면 위 리스트를 수정해주세요.
+# 현재 공개된 표준 API 이름은 'gemini-2.0-flash-exp' 또는 'gemini-1.5-flash' 입니다.
+
+# [설정] AI가 참고할 카테고리 풀
 DEFAULT_CATEGORIES = [
     "기획", "디자인", "프론트엔드", "백엔드", "데이터/AI", 
     "인프라/DevOps", "QA/테스트", "마케팅", "비즈니스", 
@@ -29,6 +39,15 @@ PURPLE_PALETTE = {
     800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
 }
 
+# [필수 함수] 색상 계산 함수 (NameError 해결을 위해 상단에 배치)
+def get_relative_color(val, max_val):
+    if max_val == 0: return PURPLE_PALETTE[400]
+    ratio = val / max_val
+    if ratio >= 0.75: return PURPLE_PALETTE[900]
+    elif ratio >= 0.50: return PURPLE_PALETTE[700]
+    elif ratio >= 0.25: return PURPLE_PALETTE[500]
+    else: return PURPLE_PALETTE[400]
+
 def get_connection():
     return st.connection("gsheets", type=GSheetsConnection)
 
@@ -41,11 +60,9 @@ def load_data():
         
         df.columns = [c.strip().lower() for c in df.columns]
         
-        # 필수 컬럼 확인
         required_cols = ["id", "date", "writer", "text", "keywords", "category"]
         for col in required_cols:
             if col not in df.columns:
-                # 없으면 빈 컬럼 생성 (에러 방지)
                 df[col] = ""
 
         if 'date' in df.columns:
@@ -61,15 +78,13 @@ def save_data_to_sheet(df):
     conn = get_connection()
     save_df = df.copy()
     if 'date' in save_df.columns:
-        # 날짜 포맷 통일
         save_df['date'] = pd.to_datetime(save_df['date']).dt.strftime('%Y-%m-%d')
     conn.update(data=save_df)
 
-# [수정] 다중 카테고리(List)를 JSON 문자열로 변환하여 저장
 def save_entry(writer, text, keywords, categories, date_val):
     df = load_data()
     
-    # 카테고리가 리스트인지 확인하고 JSON 변환
+    # 리스트 -> JSON 변환
     if isinstance(categories, list):
         cat_str = json.dumps(categories, ensure_ascii=False)
     else:
@@ -108,73 +123,69 @@ def delete_entry(entry_id):
     df = df[df['id'] != entry_id]
     save_data_to_sheet(df)
 
-# [NEW] 카테고리 파싱 (JSON 문자열 -> 파이썬 리스트)
 def parse_categories(cat_data):
     try:
-        # 이미 리스트라면 그대로 반환
-        if isinstance(cat_data, list):
-            return cat_data
-        
-        # 문자열인 경우 JSON 파싱 시도
+        if isinstance(cat_data, list): return cat_data
         cat_data = str(cat_data).strip()
-        if cat_data.startswith("["):
-            return json.loads(cat_data)
-        elif "," in cat_data:
-            # 혹시 JSON이 아니라 쉼표로 구분된 문자열이라면
-            return [c.strip() for c in cat_data.split(",")]
-        else:
-            # 단일 문자열
-            return [cat_data] if cat_data else ["기타"]
-    except:
-        return ["기타"]
+        if cat_data.startswith("["): return json.loads(cat_data)
+        elif "," in cat_data: return [c.strip() for c in cat_data.split(",")]
+        else: return [cat_data] if cat_data else ["기타"]
+    except: return ["기타"]
 
-def get_available_model():
-    try:
-        genai.configure(api_key=GOOGLE_API_KEY)
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                return m.name
-        return None
-    except:
-        return None
-
+# --- [수정됨] AI 모델 자동 전환 로직 ---
 def analyze_text(text):
-    try:
-        model_name = get_available_model()
-        if not model_name: return ["AI미연동"], ["기타"]
-        
-        model = genai.GenerativeModel(model_name)
-        
-        # [프롬프트 강화] 다중 카테고리 추출 요청
-        prompt = f"""
-        너는 IT 팀의 레슨런(Lesson Learned)을 분석하는 전문가야.
-        입력된 텍스트를 읽고 아래 규칙에 맞춰 JSON 형식으로만 응답해.
+    genai.configure(api_key=GOOGLE_API_KEY)
+    
+    last_error = None
+    
+    # 모델 리스트를 순회하며 시도
+    for model_name in MODEL_PRIORITY_LIST:
+        try:
+            # 모델 초기화
+            model = genai.GenerativeModel(model_name)
+            
+            prompt = f"""
+            너는 IT 팀의 레슨런(Lesson Learned)을 분석하는 전문가야.
+            입력된 텍스트를 읽고 아래 규칙에 맞춰 JSON 형식으로만 응답해.
 
-        1. keywords: 본문의 핵심 단어 2~3개를 리스트로 추출.
-        2. categories: 본문의 성격을 나타내는 카테고리를 리스트로 추출. (여러 개 가능)
-           - 추천 카테고리: {', '.join(DEFAULT_CATEGORIES)}
-           - 내용이 복합적이라면 ["기획", "디자인"] 처럼 2개 이상 선택 가능.
-        
-        [응답 예시]
-        {{
-            "keywords": ["API최적화", "응답속도"],
-            "categories": ["백엔드", "성능개선"]
-        }}
-        
-        텍스트: {text}
-        """
-        response = model.generate_content(prompt)
-        text_resp = response.text.replace("```json", "").replace("```", "").strip()
-        result = json.loads(text_resp)
-        
-        kws = result.get("keywords", ["분석불가"])
-        cats = result.get("categories", ["기타"])
-        
-        if isinstance(cats, str): cats = [cats]
-        
-        return kws, cats
-    except Exception as e:
-        return ["AI오류"], ["기타"]
+            1. keywords: 본문의 핵심 단어 2~3개를 리스트로 추출.
+            2. categories: 본문의 성격을 가장 잘 나타내는 카테고리를 리스트로 추출. (여러 개 가능)
+            - 참고 카테고리 풀: {', '.join(DEFAULT_CATEGORIES)}
+            - 내용이 복합적이라면 ["기획", "디자인"] 처럼 2개 이상 선택.
+            
+            [응답 예시]
+            {{
+                "keywords": ["API최적화", "응답속도"],
+                "categories": ["백엔드", "성능개선"]
+            }}
+            
+            텍스트: {text}
+            """
+            
+            # API 호출
+            response = model.generate_content(prompt)
+            text_resp = response.text.replace("```json", "").replace("```", "").strip()
+            result = json.loads(text_resp)
+            
+            kws = result.get("keywords", ["분석불가"])
+            cats = result.get("categories", ["기타"])
+            
+            if isinstance(cats, str): cats = [cats]
+            
+            # 성공 시 성공한 모델명과 함께 리턴 (로그용)
+            print(f"Success with model: {model_name}")
+            return kws, cats, model_name
+
+        except Exception as e:
+            # 실패 시 에러 로그 찍고 다음 모델로 넘어감
+            print(f"Model {model_name} failed: {e}")
+            last_error = e
+            time.sleep(1) # 아주 짧은 대기
+            continue
+    
+    # 모든 모델 실패 시
+    st.error(f"모든 AI 모델 연결에 실패했습니다. (Error: {last_error})")
+    return ["AI오류"], ["기타"], "None"
 
 def get_month_week_str(date_obj):
     try:
@@ -207,7 +218,6 @@ def confirm_delete_dialog(entry_id):
         if st.button("취소", use_container_width=True):
             st.rerun()
 
-# CSS 스타일링
 st.markdown(f"""
     <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
@@ -228,20 +238,16 @@ st.markdown(f"""
 col_head1, col_head2 = st.columns([5, 1])
 with col_head1:
     st.title("Team Lesson Learned 🚀")
-    st.caption("팀의 배움을 기록하고 공유하는 아카이브 (다중 카테고리 지원)")
+    st.caption(f"AI가 자동으로 카테고리와 키워드를 분류합니다. (Model Auto-Switching)")
 with col_head2:
-    active_model = get_available_model()
-    st.write("") 
-    st.write("") 
-    if active_model:
+    if GOOGLE_API_KEY != "YOUR_API_KEY":
         st.markdown(f'<div style="text-align: right;"><span class="ai-status-ok">🟢 AI Ready</span></div>', unsafe_allow_html=True)
     else:
-        st.markdown(f'<div style="text-align: right;"><span class="ai-status-fail">🔴 AI Fail</span></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="text-align: right;"><span class="ai-status-fail">🔴 API Key Missing</span></div>', unsafe_allow_html=True)
 
 tab1, tab2 = st.tabs(["📝 배움 기록하기", "📊 통합 대시보드"])
 
 with tab1:
-    # --- [상태 관리] 수정 모드 vs 신규 모드 ---
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
         st.info("수정 모드입니다.")
@@ -250,31 +256,19 @@ with tab1:
             st.session_state['edit_data'] = {}
             st.rerun()
             
-        # 기존 데이터 불러오기
         form_writer = st.session_state['edit_data'].get('writer', '')
         form_text = st.session_state['edit_data'].get('text', '')
-        
-        # 날짜 처리
         saved_date = st.session_state['edit_data'].get('date')
         if isinstance(saved_date, (pd.Timestamp, datetime.datetime)):
             form_date = saved_date.date()
         else:
             form_date = datetime.datetime.now().date()
-            
-        # 기존 카테고리 불러오기 (리스트 형태여야 함)
-        form_cats = parse_categories(st.session_state['edit_data'].get('category', []))
-        # 만약 기존 카테고리가 DEFAULT_CATEGORIES에 없으면 추가해서라도 보여주기
-        current_options = list(set(DEFAULT_CATEGORIES + form_cats))
-        
     else:
         st.subheader("이번주의 레슨런을 기록해주세요")
         form_writer = ""
         form_text = ""
         form_date = datetime.datetime.now().date()
-        form_cats = [] # 신규 작성시 기본은 빈 값
-        current_options = DEFAULT_CATEGORIES
 
-    # --- [입력 폼] ---
     with st.form("record_form", clear_on_submit=True):
         c_input1, c_input2 = st.columns([1, 1])
         with c_input1:
@@ -282,14 +276,7 @@ with tab1:
         with c_input2:
             selected_date = st.date_input("날짜", value=form_date)
         
-        # [핵심 변경] 다중 카테고리 선택 UI 추가
-        selected_categories = st.multiselect(
-            "카테고리 선택 (비워두면 AI가 내용 분석 후 자동 입력)", 
-            options=current_options,
-            default=[c for c in form_cats if c in current_options] # 기존 값 프리셋
-        )
-            
-        text = st.text_area("내용 (Markdown 지원)", value=form_text, height=150)
+        text = st.text_area("내용 (Markdown 지원)", value=form_text, height=150, placeholder="배운 점, 문제 해결 과정 등을 자유롭게 적어주세요. AI가 자동으로 태그를 달아줍니다.")
         
         submitted = st.form_submit_button("수정 완료" if st.session_state['edit_mode'] else "기록 저장하기", use_container_width=True)
         
@@ -297,31 +284,29 @@ with tab1:
             if not writer or not text:
                 st.error("작성자와 내용을 모두 입력해주세요.")
             else:
-                with st.spinner("✨ 데이터 처리 중..."):
-                    # 1. 키워드 분석 (항상 수행)
-                    ai_keywords, ai_cats = analyze_text(text)
+                with st.spinner("✨ AI 분석 중... (최적의 모델을 찾는 중)"):
+                    # 1. AI 분석 (Fallback 로직 포함)
+                    ai_keywords, ai_cats, used_model = analyze_text(text)
                     
-                    # 2. 카테고리 결정 로직 (하이브리드)
-                    # 사용자가 직접 선택한 게 있으면 그걸 우선 사용, 없으면 AI가 분석한 것 사용
-                    final_categories = selected_categories if selected_categories else ai_cats
-                    
-                    # 3. 저장/업데이트
-                    if st.session_state['edit_mode']:
-                        update_entry(
-                            st.session_state['edit_data']['id'], 
-                            writer, text, ai_keywords, final_categories, selected_date
-                        )
-                        st.success("✅ 수정 완료!")
-                        st.session_state['edit_mode'] = False
-                        st.session_state['edit_data'] = {}
-                        st.rerun()
+                    if used_model == "None":
+                         st.error("AI 분석에 실패하여 저장되지 않았습니다. 잠시 후 다시 시도해주세요.")
                     else:
-                        save_entry(writer, text, ai_keywords, final_categories, selected_date)
-                        st.success(f"✅ 저장 완료! (카테고리: {', '.join(final_categories)})")
+                        # 2. 저장/업데이트
+                        if st.session_state['edit_mode']:
+                            update_entry(
+                                st.session_state['edit_data']['id'], 
+                                writer, text, ai_keywords, ai_cats, selected_date
+                            )
+                            st.success(f"✅ 수정 완료! (Used: {used_model})")
+                            st.session_state['edit_mode'] = False
+                            st.session_state['edit_data'] = {}
+                            st.rerun()
+                        else:
+                            save_entry(writer, text, ai_keywords, ai_cats, selected_date)
+                            st.success(f"✅ 저장 완료! (분류: {', '.join(ai_cats)} / Used: {used_model})")
 
     st.markdown("---")
     
-    # --- [하단 리스트 뷰] ---
     df = load_data()
     c_title, c_filter1, c_filter2 = st.columns([2, 1, 1], gap="small")
     with c_title: st.subheader("📜 이전 기록 참고하기")
@@ -333,7 +318,6 @@ with tab1:
         with c_filter1: 
             selected_writer = st.selectbox("작성자", ["전체 보기"] + all_writers, label_visibility="collapsed")
         with c_filter2: 
-            # 날짜 정렬을 위해 week_str만 추출
             week_options = ["전체 기간"] + sorted(list(set(df['week_str'].dropna())), reverse=True)
             selected_week = st.selectbox("주차 선택", week_options, label_visibility="collapsed")
         
@@ -361,12 +345,10 @@ with tab1:
                 st.markdown(f'<hr style="border: 0; border-top: 1px solid #30333F; margin: 5px 0 15px 0;">', unsafe_allow_html=True)
                 st.markdown(row['text'])
                 
-                # 키워드 처리
                 try: kw_list = json.loads(row['keywords'])
                 except: kw_list = []
                 kw_str = "  ".join([f"#{k}" for k in kw_list])
                 
-                # 카테고리 뱃지 처리 (다중)
                 cats = parse_categories(row['category'])
                 cat_badges = ""
                 for c in cats:
@@ -380,7 +362,6 @@ with tab1:
 with tab2:
     df = load_data()
     if not df.empty:
-        # [통계] 다중 카테고리를 평탄화(Flatten)하여 통계 계산
         all_cats_flat = []
         for c_data in df['category']:
              all_cats_flat.extend(parse_categories(c_data))
@@ -411,7 +392,6 @@ with tab2:
                         try: kws = json.loads(row['keywords'])
                         except: kws = []
                         
-                        # [핵심] 글 하나에 카테고리가 여러 개면, 각 카테고리마다 키워드 관계를 생성
                         cats = parse_categories(row['category'])
                         for c in cats:
                             for k in kws: 
@@ -419,18 +399,14 @@ with tab2:
                     
                     if tree_data:
                         tree_df = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
-                        
-                        # 시각화 로직 (이전과 동일)
                         max_frequency = tree_df['Value'].max() if not tree_df.empty else 1
                         labels, parents, values, colors, text_colors = [], [], [], [], []
                         
-                        # 부모 노드 (카테고리)
                         for cat in tree_df['Category'].unique():
                             cat_total = tree_df[tree_df['Category'] == cat]['Value'].sum()
                             labels.append(cat); parents.append(""); values.append(cat_total)
                             colors.append(PURPLE_PALETTE[950]); text_colors.append("#FFFFFF")
 
-                        # 자식 노드 (키워드)
                         for idx, row in tree_df.iterrows():
                             labels.append(row['Keyword']); parents.append(row['Category']); values.append(row['Value'])
                             colors.append(get_relative_color(row['Value'], max_frequency)); text_colors.append("#FFFFFF")
