@@ -261,7 +261,7 @@ with tab1:
     
     df = load_data()
     c_title, c_filter1, c_filter2 = st.columns([2, 1, 1], gap="small")
-    with c_title: st.subheader("📜 이전 기록 참고하기")
+    with c_title: st.subheader("📜 Lesson Learn")
     
     if not df.empty:
         df['week_str'] = df['date'].apply(get_month_week_str)
