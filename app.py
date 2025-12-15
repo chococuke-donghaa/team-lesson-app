@@ -15,14 +15,12 @@ from streamlit_gsheets import GSheetsConnection
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
 CARD_BG_COLOR = "#0E1117"
 
-# 모델 우선순위 (쿼터 관리)
 MODEL_PRIORITY_LIST = [
     "gemini-2.5-flash",       
     "gemini-2.5-flash-lite",  
     "gemini-1.5-flash"        
 ]
 
-# AI 참고용 카테고리
 DEFAULT_CATEGORIES = [
     "기획", "디자인", "개발", "데이터", "QA", "비즈니스", "협업", "HR", "기타"
 ]
@@ -77,7 +75,6 @@ def save_data_to_sheet(df):
 
 def save_entry(writer, text, keywords, categories, date_val):
     df = load_data()
-    
     if isinstance(categories, list):
         cat_str = json.dumps(categories, ensure_ascii=False)
     else:
@@ -97,7 +94,6 @@ def save_entry(writer, text, keywords, categories, date_val):
 def update_entry(entry_id, writer, text, keywords, categories, date_val):
     df = load_data()
     idx = df[df['id'] == entry_id].index
-    
     if isinstance(categories, list):
         cat_str = json.dumps(categories, ensure_ascii=False)
     else:
@@ -130,11 +126,9 @@ def parse_categories(cat_data):
 # -----------------------------------------------------------------------------
 def analyze_text(text):
     genai.configure(api_key=GOOGLE_API_KEY)
-    
     for model_name in MODEL_PRIORITY_LIST:
         try:
             model = genai.GenerativeModel(model_name)
-            
             prompt = f"""
             너는 팀의 레슨런(Lesson Learned)을 분석하는 데이터 전문가야.
             입력된 텍스트를 분석해서 JSON 형식으로 응답해.
@@ -152,7 +146,6 @@ def analyze_text(text):
             
             텍스트: {text}
             """
-            
             response = model.generate_content(prompt)
             text_resp = response.text.replace("```json", "").replace("```", "").strip()
             result = json.loads(text_resp)
@@ -160,10 +153,8 @@ def analyze_text(text):
             kws = result.get("keywords", [])
             cats = result.get("categories", ["기타"])
             
-            # 빈 키워드 처리
             kws = [k for k in kws if k and str(k).strip() and k != "#분석불가"]
             if not kws: kws = ["#일반"]
-            
             if isinstance(cats, str): cats = [cats]
             
             print(f"✅ Success with {model_name}")
@@ -173,7 +164,6 @@ def analyze_text(text):
             print(f"⚠️ {model_name} failed: {e}")
             time.sleep(1) 
             continue
-    
     return ["#AI오류"], ["기타"], "None"
 
 def get_month_week_str(date_obj):
@@ -270,7 +260,6 @@ with tab1:
             else:
                 with st.spinner("✨ AI 분석 및 저장 중..."):
                     ai_keywords, ai_cats, used_model = analyze_text(text)
-                    
                     if used_model == "None":
                          st.error("AI 모델 연결 실패. 잠시 후 다시 시도해주세요.")
                     else:
@@ -331,7 +320,6 @@ with tab1:
                 cats = parse_categories(row['category'])
                 try: kws = json.loads(row['keywords'])
                 except: kws = []
-                
                 badges = ""
                 for c in cats:
                       badges += f'<span style="background-color: {PURPLE_PALETTE[800]}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; margin-right: 5px;">{c}</span>'
@@ -373,7 +361,6 @@ with tab2:
             st.caption("🔍 **카테고리 박스를 클릭**하면 하단에 해당 글 목록이 나타납니다.")
             
             with st.container(border=True):
-                # [단순화] 카테고리만 카운트
                 if all_cats_flat:
                     cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
                     cat_counts.columns = ['Category', 'Value']
@@ -384,13 +371,15 @@ with tab2:
                         labels = cat_counts['Category'].tolist()
                         parents = [""] * len(labels)
                         values = cat_counts['Value'].tolist()
-                        
                         colors = [get_relative_color(v, max_frequency) for v in values]
                         text_colors = ["#FFFFFF"] * len(labels)
-
-                        # 심플 트리맵 (카테고리만)
+                        
+                        # [핵심 수정] customdata에 라벨 데이터를 직접 넣어서 클릭 시 확실히 전달되게 함
                         fig_tree = go.Figure(go.Treemap(
-                            labels=labels, parents=parents, values=values,
+                            labels=labels, 
+                            parents=parents, 
+                            values=values,
+                            customdata=labels, # << 여기입니다!
                             marker=dict(colors=colors, line=dict(width=2, color=CARD_BG_COLOR)),
                             textinfo="label+value",
                             textfont=dict(family="Pretendard", color=text_colors, size=22),
@@ -399,8 +388,7 @@ with tab2:
                         ))
                         fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=450, paper_bgcolor=CARD_BG_COLOR)
                         
-                        # [클릭 이벤트] on_select="rerun"
-                        event = st.plotly_chart(fig_tree, use_container_width=True, on_select="rerun")
+                        event = st.plotly_chart(fig_tree, use_container_width=True, on_select="rerun", selection_mode="points")
                     else:
                         st.info("데이터가 없습니다.")
                         event = None
@@ -412,14 +400,20 @@ with tab2:
         st.markdown("---")
         
         selected_category = None
+        # [핵심 수정] 포인트 데이터에서 customdata를 우선적으로 확인하여 가져옴
         if event and event.selection and event.selection.points:
-            # 트리맵에서 클릭한 포인트의 라벨(카테고리명) 가져오기
-            selected_category = event.selection.points[0].get("label")
+            point = event.selection.points[0]
+            # customdata가 있으면 그걸 쓰고, 없으면 label을 씀
+            if "customdata" in point:
+                # plotly 버전에 따라 리스트로 올 수도 있음
+                cd = point["customdata"]
+                selected_category = cd[0] if isinstance(cd, list) else cd
+            else:
+                selected_category = point.get("label")
         
         if selected_category:
             st.subheader(f"📂 '{selected_category}' 카테고리 모아보기")
             
-            # 필터링: 해당 카테고리가 포함된 행만 추출
             def filter_func(row):
                 cats = parse_categories(row['category'])
                 return selected_category in cats
@@ -441,7 +435,6 @@ with tab2:
                         
                         badges = ""
                         for c in cats:
-                            # 선택된 카테고리는 보라색 강조
                             bg = PURPLE_PALETTE[800] if c == selected_category else "#444"
                             badges += f'<span style="background-color:{bg}; color:white; padding:4px 8px; border-radius:12px; font-size:0.75rem; margin-right:5px;">{c}</span>'
                         for k in kws:
