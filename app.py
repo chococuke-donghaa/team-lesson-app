@@ -326,7 +326,7 @@ with tab1:
         st.info("데이터가 없습니다.")
 
 # -----------------------------------------------------------------------------
-# TAB 2: 대시보드 (수정됨)
+# TAB 2: 대시보드 (키워드 맵 이름 충돌 해결 버전)
 # -----------------------------------------------------------------------------
 with tab2:
     df = load_data()
@@ -334,7 +334,6 @@ with tab2:
         st.info("데이터가 충분하지 않습니다.")
     else:
         # 1. 데이터 전처리 (Flattening)
-        # 모든 행의 카테고리/키워드를 리스트로 풀어서 준비
         all_cats = []
         all_kws = []
         tree_data = [] # Treemap용 데이터
@@ -348,7 +347,6 @@ with tab2:
             all_kws.extend(kws)
             
             # Treemap용 구조 데이터 생성
-            # 키워드가 비어있으면 카테고리만이라도 보여주기 위해 'General' 추가
             temp_kws = kws if kws else ["General"]
             temp_cats = cats if cats else ["기타"]
             
@@ -373,39 +371,55 @@ with tab2:
         # 3. 차트 영역
         c_left, c_right = st.columns([2, 1])
         
-        # [왼쪽] Treemap (카테고리 -> 키워드)
+        # [왼쪽] Treemap (수정됨: ID 충돌 방지 로직 추가)
         with c_left:
             st.subheader("🗺️ 주제별 키워드 맵")
             if tree_data:
+                # 데이터 집계
                 tdf = pd.DataFrame(tree_data).groupby(['Category', 'Keyword']).sum().reset_index()
                 
-                # Plotly Treemap 구조 생성
-                labels, parents, values = [], [], []
+                # Plotly Treemap 구조 생성 변수
+                ids = []      # 고유 ID (내부 식별용)
+                labels = []   # 화면 표시용 텍스트
+                parents = []  # 부모 ID
+                values = []   # 크기 값
                 
-                # 1) 부모 노드 (카테고리)
+                # 1) 부모 노드 (카테고리) 추가
                 cat_sums = tdf.groupby('Category')['Value'].sum()
+                
                 for cat, val in cat_sums.items():
+                    # ID 생성 규칙: "CAT-" 접두어 붙임
+                    unique_id = f"CAT-{cat}"
+                    
+                    ids.append(unique_id)
                     labels.append(cat)
-                    parents.append("") # 루트
+                    parents.append("") # 최상위 노드 (부모 없음)
                     values.append(val)
                 
-                # 2) 자식 노드 (키워드)
+                # 2) 자식 노드 (키워드) 추가
                 for i, row in tdf.iterrows():
-                    # 주의: 라벨 중복 방지를 위해 키워드에 보이지 않는 공백 추가하거나, 
-                    # 여기서는 간단히 구현 (같은 키워드가 다른 카테고리에 있으면 하나로 합쳐질 수 있음 -> Plotly 특성)
-                    # 정확한 계층을 위해선 id 파라미터를 써야하지만, 
-                    # 사용자 눈에 보이게 하기 위해선 부모-자식만 맞춰도 됨.
-                    labels.append(row['Keyword'])
-                    parents.append(row['Category'])
-                    values.append(row['Value'])
+                    cat = row['Category']
+                    kw = row['Keyword']
+                    val = row['Value']
+                    
+                    # ID 생성 규칙: "KW-" + 카테고리 + 키워드 조합 (유일성 보장)
+                    # 예: 부모가 '디자인'이고 자식이 '디자인'이어도 ID는 서로 다름
+                    child_id = f"KW-{cat}-{kw}"
+                    parent_id = f"CAT-{cat}"
+                    
+                    ids.append(child_id)
+                    labels.append(kw)      # 화면에는 그냥 '디자인'으로 보임 (OK)
+                    parents.append(parent_id) # 부모 ID를 참조
+                    values.append(val)
                 
                 fig = go.Figure(go.Treemap(
-                    labels=labels,
-                    parents=parents,
+                    ids=ids,         # [핵심] 고유 ID 지정
+                    labels=labels,   # 화면 표시 라벨
+                    parents=parents, # 구조 연결
                     values=values,
                     branchvalues="total",
                     textinfo="label+value",
-                    marker=dict(colorscale='Purples')
+                    marker=dict(colorscale='Purples', line=dict(width=1, color=CARD_BG_COLOR))
                 ))
                 fig.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=500, paper_bgcolor=CARD_BG_COLOR)
                 st.plotly_chart(fig, use_container_width=True)
