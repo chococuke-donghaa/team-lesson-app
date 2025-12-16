@@ -68,27 +68,37 @@ def save_data_to_sheet(df):
         save_df['date'] = pd.to_datetime(save_df['date']).dt.strftime('%Y-%m-%d')
     conn.update(data=save_df)
 
-def save_entry(writer, text, keywords, categories, date_val):
+def save_entry(entry_id, writer, text, keywords, categories, date_val):
     df = load_data()
+    
+    # 리스트 또는 단일 문자열을 JSON 문자열로 변환
     if isinstance(categories, list):
         cat_str = json.dumps(categories, ensure_ascii=False)
     else:
         cat_str = json.dumps([str(categories)], ensure_ascii=False)
+    
+    if isinstance(keywords, list):
+        kw_str = json.dumps(keywords, ensure_ascii=False)
+    else:
+        kw_str = json.dumps([str(keywords)], ensure_ascii=False)
+
 
     new_data = pd.DataFrame({
-        "id": [str(uuid.uuid4())],
+        "id": [entry_id],
         "date": [pd.to_datetime(date_val).normalize()],
         "writer": [writer],
         "text": [text],
-        "keywords": [json.dumps(keywords, ensure_ascii=False)],
+        "keywords": [kw_str],
         "category": [cat_str] 
     })
     df = pd.concat([df, new_data], ignore_index=True)
     save_data_to_sheet(df)
+    return True
 
 def update_entry(entry_id, writer, text, keywords, categories, date_val):
     df = load_data()
     idx = df[df['id'] == entry_id].index
+    
     if isinstance(categories, list):
         cat_str = json.dumps(categories, ensure_ascii=False)
     else:
@@ -101,6 +111,9 @@ def update_entry(entry_id, writer, text, keywords, categories, date_val):
         df.at[idx[0], 'category'] = cat_str
         df.at[idx[0], 'date'] = pd.to_datetime(date_val).normalize()
         save_data_to_sheet(df)
+        return True
+    return False
+
 
 def delete_entry(entry_id):
     df = load_data()
@@ -117,13 +130,16 @@ def parse_categories(cat_data):
     except: return ["기타"]
 
 # -----------------------------------------------------------------------------
-# 2. AI 분석
+# 2. AI 분석 (동기식 처리)
 # -----------------------------------------------------------------------------
 def analyze_text(text):
+    """AI 분석을 동기적으로 실행하고 결과를 반환하는 함수"""
     if GOOGLE_API_KEY == "YOUR_API_KEY":
         return ["#API_KEY_없음"], ["기타"], "None"
         
     genai.configure(api_key=GOOGLE_API_KEY)
+    kws, cats, used_model = ["#AI오류"], ["기타"], "None"
+    
     for model_name in MODEL_PRIORITY_LIST:
         try:
             model = genai.GenerativeModel(model_name)
@@ -153,27 +169,101 @@ def analyze_text(text):
             
             kws = [k for k in kws if k and str(k).strip() and k != "#분석불가"]
             if not kws: kws = ["#일반"]
-            if isinstance(cats, str): cats = cats
+            if isinstance(cats, str): cats = [cats]
             
-            # print(f"✅ Success with {model_name}")
-            return kws, cats, model_name
-
+            used_model = model_name
+            return kws, cats, used_model
+            
         except Exception as e:
-            # print(f"⚠️ {model_name} failed: {e}")
             time.sleep(1) 
             continue
-    return ["#AI오류"], ["기타"], "None"
-
-
-def get_current_week_dates():
-    """현재 주(월요일 ~ 일요일)의 시작일과 종료일을 반환합니다."""
-    today = datetime.date.today()
-    start_of_week = today - datetime.timedelta(days=today.weekday())
-    end_of_week = start_of_week + datetime.timedelta(days=6)
-    return pd.Timestamp(start_of_week).normalize(), pd.Timestamp(end_of_week).normalize()
+            
+    return kws, cats, used_model
 
 # -----------------------------------------------------------------------------
-# 3. Streamlit UI
+# [신규] 주차 레이블 생성 및 기간 계산 함수
+# -----------------------------------------------------------------------------
+
+def get_week_label(date):
+    """주어진 날짜의 'YY년 M월 N주차' 레이블과 해당 주차의 시작일(월요일)을 반환"""
+    if pd.isna(date):
+        # 유효하지 않은 날짜 처리
+        return None, None
+    
+    # 캘린더 주차 번호 대신, 월의 N번째 주로 계산 (1일~7일: 1주차, 8일~14일: 2주차...)
+    week_of_month = (date.day - 1) // 7 + 1
+    
+    label = f"{date.year % 100}년 {date.month}월 {week_of_month}주차"
+    
+    # 해당 주차의 월요일 계산
+    start_of_week = date - datetime.timedelta(days=date.weekday())
+    
+    return label, start_of_week.normalize()
+
+def get_all_week_options(df):
+    """데이터에 존재하는 모든 유니크한 주차 레이블을 반환"""
+    if df.empty:
+        return []
+    
+    # NaN 값 필터링 후, 각 날짜에 대해 주차 레이블과 시작일 계산
+    valid_dates = df['date'].dropna()
+    week_labels = valid_dates.apply(lambda x: get_week_label(x)[0]).dropna().unique()
+    
+    # 현재 주차 레이블을 맨 앞에 추가 (데이터에 없더라도)
+    current_date = datetime.date.today()
+    current_week_label, _ = get_week_label(current_date)
+    
+    options = [current_week_label] if current_week_label not in week_labels else []
+    options.extend(sorted(week_labels, reverse=True))
+    
+    return ["이번 주 기록"] + list(pd.unique(options))
+
+def get_week_range(week_label):
+    """주차 레이블에 해당하는 시작일(월)과 종료일(일)을 반환"""
+    if week_label == "이번 주 기록":
+        today = datetime.date.today()
+        start_date = today - datetime.timedelta(days=today.weekday())
+        end_date = start_date + datetime.timedelta(days=6)
+        return pd.Timestamp(start_date).normalize(), pd.Timestamp(end_date).normalize()
+    
+    try:
+        # 'YY년 M월 N주차' 형식 파싱
+        year = int(week_label[:2]) + 2000
+        month = int(week_label[3:week_label.find('월')])
+        week_num = int(week_label[week_label.find('월')+2:week_label.find('주차')])
+        
+        # 해당 월의 1일
+        first_day_of_month = datetime.date(year, month, 1)
+        
+        # 1주차의 월요일 찾기
+        first_monday = first_day_of_month + datetime.timedelta(days=(7 - first_day_of_month.weekday()) % 7)
+        
+        # N주차의 시작일 (월요일) 계산
+        # N주차는 (N-1) * 7 일 후의 월요일임
+        start_date = first_monday + datetime.timedelta(days=(week_num - 1) * 7)
+
+        # 시작일이 만약 월의 1일보다 작거나 같은데 week_num이 1인 경우, 1일부터 시작해야 함 (1일이 월요일이 아닌 경우)
+        if week_num == 1:
+            start_date = first_day_of_month
+            
+        # N주차의 종료일 (일요일)
+        end_date = start_date + datetime.timedelta(days=6)
+        
+        # 해당 월을 벗어나면 월말까지만 허용 (이 로직은 복잡해지므로, 간소화된 주차 계산 유지)
+        # 단, 시작일이 다음 달로 넘어가면 무시해야 함.
+        if start_date.month != month and week_num > 1:
+            # 주차 계산이 월을 넘겼으나, 이는 다음 주차에 해당함.
+            # 이 코드는 Streamlit 환경에서 간단한 주차 필터를 구현하기 위해 '월의 N번째 7일 구간'을 기준으로 합니다.
+            pass
+
+        return pd.Timestamp(start_date).normalize(), pd.Timestamp(end_date).normalize()
+    except Exception:
+        # 파싱 오류가 나면 현재 주차 반환 (안전 장치)
+        return get_week_range("이번 주 기록")
+
+
+# -----------------------------------------------------------------------------
+# 4. Streamlit UI
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="Team Lesson Learned", layout="wide")
 
@@ -314,11 +404,11 @@ with tab1:
         form_text = ""
         form_date = datetime.date.today()
         
-    # [수정] 취소 버튼을 폼 바깥에 배치하여 오류 회피
+    # [수정] 취소 버튼을 폼 영역과 분리하여 배치 (오류 회피)
     if st.session_state['edit_mode']:
-        col_outside_cancel, col_outside_dummy = st.columns([1, 3])
+        col_outside_cancel, col_outside_dummy = st.columns([1, 3]) 
         with col_outside_cancel:
-            if st.button("취소하고 새 글 쓰기", key="cancel_edit_outside", use_container_width=True):
+            if st.button("취소하고 새 글 쓰기", key="cancel_edit_outside", use_container_width=True, type="secondary"):
                 st.session_state['edit_mode'] = False
                 st.session_state['edit_data'] = {}
                 st.rerun()
@@ -331,8 +421,10 @@ with tab1:
         with c_input2:
             selected_date = st.date_input("날짜", value=form_date, key="form_date")
         
+        # [수정] 내용 입력란 높이 300px로 증가
         text = st.text_area("내용 (Markdown 지원)", value=form_text, height=300, placeholder="배운 점, 문제 해결 과정 등을 자유롭게 적어주세요. AI가 자동으로 태그를 달아줍니다.", key="form_text")
         
+        # 폼 제출 버튼
         if st.session_state['edit_mode']:
             submitted = st.form_submit_button("수정 완료", type="primary", use_container_width=True)
         else:
@@ -340,18 +432,12 @@ with tab1:
 
 
         if submitted:
-            # 폼 제출 후 처리 로직 (수정 완료 또는 저장하기)
             if not writer or not text:
                 st.error("작성자와 내용을 모두 입력해주세요.")
             else:
+                # 동기식 AI 분석 (스피너 표시)
                 with st.spinner("✨ AI 분석 및 저장 중..."):
                     ai_keywords, ai_cats, used_model = analyze_text(text)
-                    if used_model == "None" and GOOGLE_API_KEY != "YOUR_API_KEY":
-                         st.error("AI 모델 연결 실패. 잠시 후 다시 시도해주세요.")
-                    elif GOOGLE_API_KEY == "YOUR_API_KEY":
-                        st.warning("API 키가 없어 자동 분석은 건너뛰었습니다. (태그: #API_KEY_없음)")
-                        ai_keywords, ai_cats = ["#API_KEY_없음"], ["기타"]
-                        used_model = "Manual"
                     
                     if st.session_state['edit_mode']:
                         update_entry(
@@ -359,12 +445,14 @@ with tab1:
                             writer, text, ai_keywords, ai_cats, selected_date
                         )
                         st.success(f"✅ 수정 완료! (Model: {used_model})")
-                        st.session_state['edit_mode'] = False
-                        st.session_state['edit_data'] = {}
-                        st.rerun()
                     else:
-                        save_entry(writer, text, ai_keywords, ai_cats, selected_date)
-                        st.success(f"✅ 저장 완료! (태그: {', '.join(ai_cats)} / Model: {used_model})")
+                        entry_id = str(uuid.uuid4())
+                        save_entry(entry_id, writer, text, ai_keywords, ai_cats, selected_date)
+                        st.success(f"✅ 저장 완료! (Model: {used_model})")
+                    
+                    st.session_state['edit_mode'] = False
+                    st.session_state['edit_data'] = {}
+                    st.rerun()
 
     st.markdown("---")
     
@@ -374,42 +462,37 @@ with tab1:
     st.subheader("🔍 기록 조회")
     
     if not df.empty:
-        # 필터 위젯 설정
+        # [수정] 필터 위젯 설정: 날짜 대신 주차 필터링 사용
         all_writers = ["전체"] + sorted(df['writer'].unique().tolist())
+        all_weeks = get_all_week_options(df)
+
         col_filter1, col_filter2 = st.columns([1, 1])
         
         with col_filter1:
             writer_filter = st.selectbox("작성자 필터", all_writers, index=0, key="tab1_writer_filter")
             
         with col_filter2:
-            default_date = datetime.date.today()
-            date_filter = st.date_input("특정 날짜", value=default_date, key="tab1_date_filter")
+            week_filter = st.selectbox("주차 필터", all_weeks, index=0, key="tab1_week_filter")
 
         
         # 필터링 로직
-        current_week_start, current_week_end = get_current_week_dates()
         
-        # 1. 기본 필터 (이번 주)
+        # 1. 주차 필터 적용
+        start_of_week_filter, end_of_week_filter = get_week_range(week_filter)
+        
+        # 해당 주차 범위 내의 기록 필터링
         filtered_df = df[
-            (df['date'] >= current_week_start) & 
-            (df['date'] <= current_week_end)
+            (df['date'] >= start_of_week_filter) & 
+            (df['date'] <= end_of_week_filter)
         ].copy()
         
-        is_filtered_by_user = (writer_filter != "전체") or (date_filter != default_date)
+        # 2. 작성자 필터 적용
+        if writer_filter != "전체":
+            filtered_df = filtered_df[filtered_df['writer'] == writer_filter]
         
-        if is_filtered_by_user:
-            filtered_df = df.copy()
-            
-            if writer_filter != "전체":
-                filtered_df = filtered_df[filtered_df['writer'] == writer_filter]
-                
-            if date_filter != default_date:
-                date_filter_ts = pd.Timestamp(date_filter).normalize()
-                filtered_df = filtered_df[filtered_df['date'] == date_filter_ts]
+        # 캡션 업데이트
+        st.caption(f"**필터링**된 기록 (총 {len(filtered_df)}건, {start_of_week_filter.date()} ~ {end_of_week_filter.date()})")
 
-            st.caption(f"**필터링**된 기록 (총 {len(filtered_df)}건)")
-        else:
-            st.caption(f"**이번 주 기록** (총 {len(filtered_df)}건, {current_week_start.date()} ~ {current_week_end.date()})")
 
         # 목록 출력 (풀어서 표시)
         if not filtered_df.empty:
@@ -461,10 +544,7 @@ with tab1:
                     # 태그 아래 마진을 위해 .tag-container 사용
                     st.markdown(f"<div class='tag-container'>{cat_badges} <span class='keyword-text'>{keyword_text}</span></div>", unsafe_allow_html=True)
         else:
-            if is_filtered_by_user:
-                st.info("선택한 조건에 맞는 기록이 없습니다.")
-            else:
-                st.info("이번 주에 작성된 기록이 없습니다.")
+            st.info("선택한 조건에 맞는 기록이 없습니다.")
     else:
         st.info("아직 기록이 없습니다.")
 
