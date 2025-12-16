@@ -58,7 +58,7 @@ def load_data():
         df = df.fillna("")
         return df
     except Exception as e:
-        st.error(f"데이터를 불러오는 중 문제가 발생했습니다: {e}")
+        # st.error(f"데이터를 불러오는 중 문제가 발생했습니다: {e}")
         return pd.DataFrame(columns=["id", "date", "writer", "text", "keywords", "category"])
 
 def save_data_to_sheet(df):
@@ -288,6 +288,7 @@ def get_week_range(week_label):
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="Team Lesson Learned", layout="wide")
 
+# [수정] Session State 초기화 시점 조정
 if 'edit_mode' not in st.session_state:
     st.session_state['edit_mode'] = False
 if 'edit_data' not in st.session_state:
@@ -412,6 +413,7 @@ with tab1:
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
         
+        # [오류 해결] 수정 모드 시 폼 데이터 초기화
         form_writer = st.session_state['edit_data'].get('writer', '')
         form_text = st.session_state['edit_data'].get('text', '')
         saved_date = st.session_state['edit_data'].get('date')
@@ -438,12 +440,15 @@ with tab1:
     with st.form("record_form", clear_on_submit=True):
         c_input1, c_input2 = st.columns([1, 1])
         with c_input1:
-            writer = st.text_input("작성자", value=form_writer, placeholder="이름 입력", key="form_writer")
+            # [오류 해결] 폼 키를 ID와 결합하여 고유성 강제
+            writer = st.text_input("작성자", value=form_writer, placeholder="이름 입력", key=f"form_writer_{st.session_state.get('edit_data', {}).get('id', 'new')}")
         with c_input2:
-            selected_date = st.date_input("날짜", value=form_date, key="form_date")
+            # [오류 해결] 폼 키를 ID와 결합하여 고유성 강제
+            selected_date = st.date_input("날짜", value=form_date, key=f"form_date_{st.session_state.get('edit_data', {}).get('id', 'new')}")
         
         # [수정] 내용 입력란 높이 300px로 증가
-        text = st.text_area("내용 (Markdown 지원)", value=form_text, height=300, placeholder="배운 점, 문제 해결 과정 등을 자유롭게 적어주세요. AI가 자동으로 태그를 달아줍니다.", key="form_text")
+        # [오류 해결] 폼 키를 ID와 결합하여 고유성 강제
+        text = st.text_area("내용 (Markdown 지원)", value=form_text, height=300, placeholder="배운 점, 문제 해결 과정 등을 자유롭게 적어주세요. AI가 자동으로 태그를 달아줍니다.", key=f"form_text_{st.session_state.get('edit_data', {}).get('id', 'new')}")
         
         # 폼 제출 버튼
         if st.session_state['edit_mode']:
