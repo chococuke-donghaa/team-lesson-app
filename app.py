@@ -331,7 +331,7 @@ with tab1:
         with c_input2:
             selected_date = st.date_input("날짜", value=form_date, key="form_date")
         
-        text = st.text_area("내용 (Markdown 지원)", value=form_text, height=150, placeholder="배운 점, 문제 해결 과정 등을 자유롭게 적어주세요. AI가 자동으로 태그를 달아줍니다.", key="form_text")
+        text = st.text_area("내용 (Markdown 지원)", value=form_text, height=300, placeholder="배운 점, 문제 해결 과정 등을 자유롭게 적어주세요. AI가 자동으로 태그를 달아줍니다.", key="form_text")
         
         if st.session_state['edit_mode']:
             submitted = st.form_submit_button("수정 완료", type="primary", use_container_width=True)
