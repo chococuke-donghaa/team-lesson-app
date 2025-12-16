@@ -201,6 +201,10 @@ st.markdown(f"""
     div[data-testid="stMetric"] {{ background-color: {CARD_BG_COLOR}; border: 1px solid #30333F; padding: 15px; border-radius: 10px; }}
     div[data-testid="stMetricLabel"] {{ color: #9CA3AF !important; }}
     div[data-testid="stMetricValue"] {{ color: white !important; font-weight: 700 !important; }}
+    
+    /* Plotly 배경 투명하게 또는 어둡게 설정 */
+    .js-plotly-plot .plotly {{ background-color: {CARD_BG_COLOR} !important; }}
+    .modebar {{ background-color: {CARD_BG_COLOR} !important; border: 1px solid #30333F; border-top-left-radius: 5px; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -391,23 +395,26 @@ with tab2:
             for k in df['keywords']: all_kws.extend(json.loads(k))
         except: all_kws = []
         
-        # 1. 핵심 지표 & 트리맵
-        col_kpi, col_tree = st.columns([1, 3])
+        # 1. 핵심 지표 & 트리맵 (하나의 행으로 통합)
+        col_kpi_and_tree, col_tree_content = st.columns([1, 3])
         
-        with col_kpi:
+        with col_kpi_and_tree:
             st.subheader("Key Metrics")
             st.metric("총 기록 수", f"{total}건")
             st.metric("가장 핫한 주제", top_cat)
             st.metric("누적 키워드", f"{len(set(all_kws))}개")
             st.metric("최다 작성자", top_writer)
+            # KPI가 Tree Map의 높이를 대략 맞출 수 있도록 빈 공간 채움
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
 
-        with col_tree:
+        with col_tree_content:
             st.subheader("🗺️ Lesson Map (카테고리 비중)")
             st.caption("가장 많은 기록이 있는 카테고리를 시각적으로 보여줍니다.")
             if all_cats_flat:
                 cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
                 cat_counts.columns = ['Category', 'Value']
                 
+                # Plotly Treemap
                 fig_tree = px.treemap(
                     cat_counts, 
                     path=['Category'], 
@@ -415,7 +422,8 @@ with tab2:
                     color='Value',
                     color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])]
                 )
-                fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=300, paper_bgcolor=CARD_BG_COLOR)
+                # [수정] Treemap 높이를 KPI와 대략 맞추기 위해 320px 지정
+                fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=320, paper_bgcolor=CARD_BGCOLOR, plot_bgcolor=CARD_BGCOLOR)
                 fig_tree.update_traces(textfont=dict(family="Pretendard", color="white", size=18))
                 st.plotly_chart(fig_tree, use_container_width=True)
             else:
@@ -434,7 +442,8 @@ with tab2:
                 cat_counts_pie.columns = ['category', 'count']
                 fig_pie = px.pie(cat_counts_pie, values='count', names='category', hole=0.5, 
                                  color_discrete_sequence=[PURPLE_PALETTE[x] for x in [500, 600, 700, 800, 900]])
-                fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20), paper_bgcolor=CARD_BG_COLOR)
+                # [수정] 차트 배경색 통일
+                fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20), paper_bgcolor=CARD_BGCOLOR, plot_bgcolor=CARD_BGCOLOR)
                 st.plotly_chart(fig_pie, use_container_width=True)
             else:
                 st.info("데이터 부족")
@@ -449,11 +458,12 @@ with tab2:
                     text=kw_counts['count'], textposition='outside',
                     marker=dict(color=PURPLE_PALETTE[600])
                 ))
+                # [수정] 차트 배경색 통일
                 fig_bar.update_layout(
                     xaxis=dict(showgrid=False, visible=False), 
                     yaxis=dict(showgrid=False, autorange="reversed"),
                     height=350, margin=dict(t=20, b=20, l=10, r=40),
-                    paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR
+                    paper_bgcolor=CARD_BGCOLOR, plot_bgcolor=CARD_BGCOLOR
                 )
                 st.plotly_chart(fig_bar, use_container_width=True)
             else:
@@ -462,7 +472,7 @@ with tab2:
         st.divider()
 
         # ----------------------------------------------------------
-        # 4. 전체 목록 필터링 (Category Filter) - 조회 전용
+        # 4. 전체 목록 필터링 (Category Filter) - 조회 전용 (버튼 제거)
         # ----------------------------------------------------------
         st.subheader("🗂️ 전체 레슨런 목록 (카테고리 필터)")
         
@@ -490,11 +500,9 @@ with tab2:
             
             for idx, row in filtered_df_dash.iterrows():
                 with st.container(border=True):
-                    # 헤더: 날짜 | 작성자 (버튼 없음)
-                    c1 = st.columns([1])[0]
-                    with c1:
-                        date_str = row['date'].strftime('%Y-%m-%d') if isinstance(row['date'], pd.Timestamp) else str(row['date'])[:10]
-                        st.markdown(f"**{row['writer']}** <span style='color:#777; font-size:0.9em; margin-left:10px;'>{date_str}</span>", unsafe_allow_html=True)
+                    # [수정] 조회 전용으로 간단히 표시
+                    date_str = row['date'].strftime('%Y-%m-%d') if isinstance(row['date'], pd.Timestamp) else str(row['date'])[:10]
+                    st.markdown(f"**{row['writer']}** <span style='color:#777; font-size:0.9em; margin-left:10px;'>{date_str}</span>", unsafe_allow_html=True)
                     
                     st.markdown("---")
                     st.markdown(row['text'])
