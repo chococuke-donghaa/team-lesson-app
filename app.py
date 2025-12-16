@@ -32,6 +32,9 @@ PURPLE_PALETTE = {
     800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
 }
 
+# Plotly 차트 배경색 헥스 코드 (안정적인 작동을 위해 직접 사용)
+PLOTLY_BG_HEX = "#0E1117"
+
 def get_connection():
     return st.connection("gsheets", type=GSheetsConnection)
 
@@ -151,7 +154,7 @@ def analyze_text(text):
             
             kws = [k for k in kws if k and str(k).strip() and k != "#분석불가"]
             if not kws: kws = ["#일반"]
-            if isinstance(cats, str): cats = [cats]
+            if isinstance(cats, str): cats = cats
             
             # print(f"✅ Success with {model_name}")
             return kws, cats, model_name
@@ -202,7 +205,7 @@ st.markdown(f"""
     div[data-testid="stMetricLabel"] {{ color: #9CA3AF !important; }}
     div[data-testid="stMetricValue"] {{ color: white !important; font-weight: 700 !important; }}
     
-    /* Plotly 배경색은 Streamlit Dark Theme을 사용하도록 CSS 제거 및 코드 수정 */
+    /* Plotly는 template="plotly_dark"를 사용 */
     </style>
 """, unsafe_allow_html=True)
 
@@ -393,38 +396,39 @@ with tab2:
             for k in df['keywords']: all_kws.extend(json.loads(k))
         except: all_kws = []
         
-        # 1. 핵심 지표 & 트리맵 (하나의 행으로 통합)
-        col_kpi_and_tree, col_tree_content = st.columns([1, 3])
+        # 1. 핵심 지표
+        st.subheader("Key Metrics")
+        col_kpi_1, col_kpi_2, col_kpi_3, col_kpi_4 = st.columns(4)
         
-        with col_kpi_and_tree:
-            st.subheader("Key Metrics")
-            st.metric("총 기록 수", f"{total}건")
-            st.metric("가장 핫한 주제", top_cat)
-            st.metric("누적 키워드", f"{len(set(all_kws))}개")
-            st.metric("최다 작성자", top_writer)
-            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
-
-        with col_tree_content:
-            st.subheader("🗺️ Lesson Map (카테고리 비중)")
-            st.caption("가장 많은 기록이 있는 카테고리를 시각적으로 보여줍니다.")
-            if all_cats_flat:
-                cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
-                cat_counts.columns = ['Category', 'Value']
-                
-                # Plotly Treemap
-                fig_tree = px.treemap(
-                    cat_counts, 
-                    path=['Category'], 
-                    values='Value',
-                    color='Value',
-                    color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])]
-                )
-                # [수정] 차트 배경색을 PLOTLY_BG_HEX로 직접 지정하여 NameError 우회
-                fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=320, paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR, template="plotly_dark")
-                fig_tree.update_traces(textfont=dict(family="Pretendard", color="white", size=18))
-                st.plotly_chart(fig_tree, use_container_width=True)
-            else:
-                st.info("데이터 부족")
+        with col_kpi_1: st.metric("총 기록 수", f"{total}건")
+        with col_kpi_2: st.metric("가장 핫한 주제", top_cat)
+        with col_kpi_3: st.metric("누적 키워드", f"{len(set(all_kws))}개")
+        with col_kpi_4: st.metric("최다 작성자", top_writer)
+        
+        st.divider() 
+        
+        # 2. 트리맵 (Lesson Map) - 풀 너비
+        st.subheader("🗺️ Lesson Map (카테고리 비중)")
+        st.caption("가장 많은 기록이 있는 카테고리를 시각적으로 보여줍니다.")
+        if all_cats_flat:
+            cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
+            cat_counts.columns = ['Category', 'Value']
+            
+            # Plotly Treemap
+            fig_tree = px.treemap(
+                cat_counts, 
+                path=['Category'], 
+                values='Value',
+                color='Value',
+                color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])]
+            )
+            # [수정] 배경색을 PLOTLY_BG_HEX로 지정하고, Dark Theme 템플릿 사용
+            fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=350, template="plotly_dark", 
+                                   paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
+            fig_tree.update_traces(textfont=dict(family="Pretendard", color="white", size=18))
+            st.plotly_chart(fig_tree, use_container_width=True)
+        else:
+            st.info("데이터 부족")
 
         st.divider()
         
@@ -439,8 +443,9 @@ with tab2:
                 cat_counts_pie.columns = ['category', 'count']
                 fig_pie = px.pie(cat_counts_pie, values='count', names='category', hole=0.5, 
                                  color_discrete_sequence=[PURPLE_PALETTE[x] for x in [500, 600, 700, 800, 900]])
-                # [수정] 차트 배경색을 PLOTLY_BG_HEX로 직접 지정하여 NameError 우회
-                fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20), paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR, template="plotly_dark")
+                # [수정] 차트 배경색 설정
+                fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20), template="plotly_dark", 
+                                      paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
                 st.plotly_chart(fig_pie, use_container_width=True)
             else:
                 st.info("데이터 부족")
@@ -455,7 +460,7 @@ with tab2:
                     text=kw_counts['count'], textposition='outside',
                     marker=dict(color=PURPLE_PALETTE[600])
                 ))
-                # [수정] 차트 배경색을 PLOTLY_BG_HEX로 직접 지정하여 NameError 우회
+                # [수정] 차트 배경색 설정
                 fig_bar.update_layout(
                     xaxis=dict(showgrid=False, visible=False), 
                     yaxis=dict(showgrid=False, autorange="reversed"),
@@ -468,9 +473,7 @@ with tab2:
 
         st.divider()
 
-        # ----------------------------------------------------------
         # 4. 전체 목록 필터링 (Category Filter) - 조회 전용 (버튼 제거)
-        # ----------------------------------------------------------
         st.subheader("🗂️ 전체 레슨런 목록 (카테고리 필터)")
         
         unique_categories = sorted(list(set(all_cats_flat)))
