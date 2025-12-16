@@ -187,8 +187,8 @@ def get_week_label_and_start(date_obj):
     if pd.isna(date_obj):
         return None, None
     
-    # datetime.date 객체를 pd.Timestamp로 변환하여 안전하게 처리
-    if isinstance(date_obj, datetime.date) and not isinstance(date_obj, pd.Timestamp):
+    # 모든 날짜 객체를 pd.Timestamp로 변환하여 normalize를 안전하게 호출
+    if not isinstance(date_obj, pd.Timestamp):
         date_obj = pd.to_datetime(date_obj).normalize()
 
     # 1. 해당 월의 N번째 주차 계산 (1일-7일: 1주차, 8일-14일: 2주차...)
@@ -210,11 +210,11 @@ def get_all_week_options(df):
     # 유효한 날짜에서 주차 레이블 추출
     valid_dates = df['date'].dropna()
     
-    # Timestamp 객체만 남기도록 필터링
-    valid_timestamps = valid_dates[valid_dates.apply(lambda x: isinstance(x, pd.Timestamp))]
+    # 각 날짜에 대해 주차 레이블 계산
+    week_label_data = valid_dates.apply(lambda x: get_week_label_and_start(x))
     
-    # 각 Timestamp에 대해 주차 레이블 계산
-    week_labels = valid_timestamps.apply(lambda x: get_week_label_and_start(x)[0]).unique()
+    # 레이블만 추출
+    week_labels = week_label_data.apply(lambda x: x[0]).unique()
     
     # 현재 주차 레이블을 계산
     current_date = datetime.date.today()
@@ -228,9 +228,25 @@ def get_all_week_options(df):
     # 데이터의 주차 옵션 추가 및 정렬 (최신 순)
     options.extend(week_labels)
     options = list(pd.unique(options))
-    options.sort(key=lambda x: datetime.datetime.strptime(x[:7] + " 1", "%y년 %m월 %d") if '년' in x else datetime.datetime.now(), reverse=True)
     
-    return ["이번 주 기록"] + [o for o in options if o != current_week_label]
+    # 주차 레이블을 날짜로 변환하여 최신순으로 정렬
+    def parse_week_for_sort(label):
+        if '년' in label:
+            try:
+                # "YY년 M월 N주차" -> YYYY-MM-01 형태로 변환하여 정렬
+                parts = label.split()
+                year = int(parts[0][:-1])
+                month = int(parts[1][:-1])
+                return datetime.date(2000 + year, month, 1)
+            except Exception:
+                return datetime.date(1900, 1, 1) # 정렬 시 가장 뒤로
+        return datetime.date(2100, 1, 1) # '이번 주 기록'은 가장 최신으로
+
+    options.sort(key=parse_week_for_sort, reverse=True)
+    
+    final_options = ["이번 주 기록"] + [o for o in options if o != current_week_label and o != "이번 주 기록"]
+    
+    return list(pd.unique(final_options))
 
 
 def get_week_range(week_label):
@@ -249,19 +265,15 @@ def get_week_range(week_label):
         month = int(parts[1][:-1])
         week_num = int(parts[2][:-2])
         
-        # 해당 월의 1일
-        first_day_of_month = datetime.date(year, month, 1)
+        # 1. 해당 월의 1일
+        current_day = datetime.date(year, month, 1)
         
-        # 1주차의 월요일 찾기
-        start_date = first_day_of_month
+        # 2. N주차의 시작일(월요일) 계산
+        # N주차는 (N-1) * 7 일 후의 월요일로 계산
+        current_day += datetime.timedelta(days=(week_num - 1) * 7)
         
-        # N주차의 시작일 (월요일) 계산 (주차가 월의 N번째 7일 구간으로 정의됨)
-        # N-1 주만큼 건너뛰기
-        start_date += datetime.timedelta(days=(week_num - 1) * 7)
-        
-        # 월요일로 조정 (Streamlit의 주차 정의와 일치하도록)
-        start_date = start_date - datetime.timedelta(days=start_date.weekday())
-        
+        # 해당 주차의 월요일(시작일) 계산
+        start_date = current_day - datetime.timedelta(days=current_day.weekday())
         end_date = start_date + datetime.timedelta(days=6)
 
         return pd.to_datetime(start_date).normalize(), pd.to_datetime(end_date).normalize()
@@ -481,7 +493,9 @@ with tab1:
             writer_filter = st.selectbox("작성자 필터", all_writers, index=0, key="tab1_writer_filter")
             
         with col_filter2:
-            week_filter = st.selectbox("주차 필터", all_weeks, index=0, key="tab1_week_filter")
+            # '이번 주 기록'을 기본값으로 설정
+            default_week_index = all_weeks.index("이번 주 기록") if "이번 주 기록" in all_weeks else 0
+            week_filter = st.selectbox("주차 필터", all_weeks, index=default_week_index, key="tab1_week_filter")
 
         
         # 필터링 로직
