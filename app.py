@@ -71,7 +71,6 @@ def save_data_to_sheet(df):
 def save_entry(entry_id, writer, text, keywords, categories, date_val):
     df = load_data()
     
-    # 리스트 또는 단일 문자열을 JSON 문자열로 변환
     if isinstance(categories, list):
         cat_str = json.dumps(categories, ensure_ascii=False)
     else:
@@ -113,7 +112,6 @@ def update_entry(entry_id, writer, text, keywords, categories, date_val):
         save_data_to_sheet(df)
         return True
     return False
-
 
 def delete_entry(entry_id):
     df = load_data()
@@ -181,82 +179,93 @@ def analyze_text(text):
     return kws, cats, used_model
 
 # -----------------------------------------------------------------------------
-# [신규] 주차 레이블 생성 및 기간 계산 함수
+# [수정] 주차 레이블 생성 및 기간 계산 함수 (안정화)
 # -----------------------------------------------------------------------------
 
-def get_week_label(date):
-    """주어진 날짜의 'YY년 M월 N주차' 레이블과 해당 주차의 시작일(월요일)을 반환"""
-    if pd.isna(date):
-        # 유효하지 않은 날짜 처리
+def get_week_label_and_start(date_obj):
+    """주어진 날짜의 'YY년 M월 N주차' 레이블과 해당 주차의 시작일(월요일)을 pd.Timestamp로 반환"""
+    if pd.isna(date_obj):
         return None, None
     
-    # 캘린더 주차 번호 대신, 월의 N번째 주로 계산 (1일~7일: 1주차, 8일~14일: 2주차...)
-    week_of_month = (date.day - 1) // 7 + 1
+    # datetime.date 객체를 pd.Timestamp로 변환하여 안전하게 처리
+    if isinstance(date_obj, datetime.date) and not isinstance(date_obj, pd.Timestamp):
+        date_obj = pd.to_datetime(date_obj).normalize()
+
+    # 1. 해당 월의 N번째 주차 계산 (1일-7일: 1주차, 8일-14일: 2주차...)
+    week_of_month = (date_obj.day - 1) // 7 + 1
     
-    label = f"{date.year % 100}년 {date.month}월 {week_of_month}주차"
+    label = f"{date_obj.year % 100}년 {date_obj.month}월 {week_of_month}주차"
     
-    # 해당 주차의 월요일 계산
-    start_of_week = date - datetime.timedelta(days=date.weekday())
+    # 2. 해당 주차의 월요일(시작일) 계산
+    # date_obj.weekday()는 월요일(0)부터 일요일(6)
+    start_of_week = date_obj - datetime.timedelta(days=date_obj.weekday())
     
     return label, start_of_week.normalize()
 
 def get_all_week_options(df):
     """데이터에 존재하는 모든 유니크한 주차 레이블을 반환"""
     if df.empty:
-        return []
+        return ["이번 주 기록"]
     
-    # NaN 값 필터링 후, 각 날짜에 대해 주차 레이블과 시작일 계산
+    # 유효한 날짜에서 주차 레이블 추출
     valid_dates = df['date'].dropna()
-    week_labels = valid_dates.apply(lambda x: get_week_label(x)[0]).dropna().unique()
     
-    # 현재 주차 레이블을 맨 앞에 추가 (데이터에 없더라도)
+    # Timestamp 객체만 남기도록 필터링
+    valid_timestamps = valid_dates[valid_dates.apply(lambda x: isinstance(x, pd.Timestamp))]
+    
+    # 각 Timestamp에 대해 주차 레이블 계산
+    week_labels = valid_timestamps.apply(lambda x: get_week_label_and_start(x)[0]).unique()
+    
+    # 현재 주차 레이블을 계산
     current_date = datetime.date.today()
-    current_week_label, _ = get_week_label(current_date)
+    current_week_label, _ = get_week_label_and_start(current_date)
     
-    options = [current_week_label] if current_week_label not in week_labels else []
-    options.extend(sorted(week_labels, reverse=True))
+    options = []
+    # 현재 주차를 포함하되 중복 제거
+    if current_week_label not in week_labels:
+        options.append(current_week_label)
+
+    # 데이터의 주차 옵션 추가 및 정렬 (최신 순)
+    options.extend(week_labels)
+    options = list(pd.unique(options))
+    options.sort(key=lambda x: datetime.datetime.strptime(x[:7] + " 1", "%y년 %m월 %d") if '년' in x else datetime.datetime.now(), reverse=True)
     
-    return ["이번 주 기록"] + list(pd.unique(options))
+    return ["이번 주 기록"] + [o for o in options if o != current_week_label]
+
 
 def get_week_range(week_label):
-    """주차 레이블에 해당하는 시작일(월)과 종료일(일)을 반환"""
+    """주차 레이블에 해당하는 시작일(월)과 종료일(일)을 pd.Timestamp로 반환"""
+    today = datetime.date.today()
+    
     if week_label == "이번 주 기록":
-        today = datetime.date.today()
         start_date = today - datetime.timedelta(days=today.weekday())
         end_date = start_date + datetime.timedelta(days=6)
-        return pd.Timestamp(start_date).normalize(), pd.Timestamp(end_date).normalize()
+        return pd.to_datetime(start_date).normalize(), pd.to_datetime(end_date).normalize()
     
     try:
         # 'YY년 M월 N주차' 형식 파싱
-        year = int(week_label[:2]) + 2000
-        month = int(week_label[3:week_label.find('월')])
-        week_num = int(week_label[week_label.find('월')+2:week_label.find('주차')])
+        parts = week_label.split()
+        year = int(parts[0][:-1]) + 2000
+        month = int(parts[1][:-1])
+        week_num = int(parts[2][:-2])
         
         # 해당 월의 1일
         first_day_of_month = datetime.date(year, month, 1)
         
         # 1주차의 월요일 찾기
-        first_monday = first_day_of_month + datetime.timedelta(days=(7 - first_day_of_month.weekday()) % 7)
+        start_date = first_day_of_month
         
-        # N주차의 시작일 (월요일) 계산
-        # N주차는 (N-1) * 7 일 후의 월요일임
-        start_date = first_monday + datetime.timedelta(days=(week_num - 1) * 7)
-
-        # 시작일이 만약 월의 1일보다 작거나 같은데 week_num이 1인 경우, 1일부터 시작해야 함 (1일이 월요일이 아닌 경우)
-        if week_num == 1:
-            start_date = first_day_of_month
-            
-        # N주차의 종료일 (일요일)
+        # N주차의 시작일 (월요일) 계산 (주차가 월의 N번째 7일 구간으로 정의됨)
+        # N-1 주만큼 건너뛰기
+        start_date += datetime.timedelta(days=(week_num - 1) * 7)
+        
+        # 월요일로 조정 (Streamlit의 주차 정의와 일치하도록)
+        start_date = start_date - datetime.timedelta(days=start_date.weekday())
+        
         end_date = start_date + datetime.timedelta(days=6)
-        
-        # 해당 월을 벗어나면 월말까지만 허용 (이 로직은 복잡해지므로, 간소화된 주차 계산 유지)
-        # 단, 시작일이 다음 달로 넘어가면 무시해야 함.
-        if start_date.month != month and week_num > 1:
-            # 주차 계산이 월을 넘겼으나, 이는 다음 주차에 해당함.
-            # 이 코드는 Streamlit 환경에서 간단한 주차 필터를 구현하기 위해 '월의 N번째 7일 구간'을 기준으로 합니다.
-            pass
 
-        return pd.Timestamp(start_date).normalize(), pd.Timestamp(end_date).normalize()
+        return pd.to_datetime(start_date).normalize(), pd.to_datetime(end_date).normalize()
+
     except Exception:
         # 파싱 오류가 나면 현재 주차 반환 (안전 장치)
         return get_week_range("이번 주 기록")
