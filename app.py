@@ -32,9 +32,6 @@ PURPLE_PALETTE = {
     800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
 }
 
-# Plotly 차트 배경색 헥스 코드 (NameError 우회를 위해 직접 사용)
-PLOTLY_BG_HEX = "#0E1117"
-
 def get_connection():
     return st.connection("gsheets", type=GSheetsConnection)
 
@@ -205,9 +202,7 @@ st.markdown(f"""
     div[data-testid="stMetricLabel"] {{ color: #9CA3AF !important; }}
     div[data-testid="stMetricValue"] {{ color: white !important; font-weight: 700 !important; }}
     
-    /* Plotly 배경색을 PLOTLY_BG_HEX로 강제하여 통일 */
-    .js-plotly-plot .plotly {{ background-color: {PLOTLY_BG_HEX} !important; }}
-    .modebar {{ background-color: {PLOTLY_BG_HEX} !important; border: 1px solid #30333F; border-top-left-radius: 5px; }}
+    /* Plotly 배경색은 Streamlit Dark Theme을 사용하도록 CSS 제거 및 코드 수정 */
     </style>
 """, unsafe_allow_html=True)
 
@@ -424,8 +419,8 @@ with tab2:
                     color='Value',
                     color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])]
                 )
-                # [수정] 차트 배경색을 헥스 코드로 직접 지정하여 NameError 우회
-                fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=320, paper_bgcolor=PLOTLY_BG_HEX, plot_bgcolor=PLOTLY_BG_HEX)
+                # [수정] 차트 배경색을 PLOTLY_BG_HEX로 직접 지정하여 NameError 우회
+                fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=320, paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR, template="plotly_dark")
                 fig_tree.update_traces(textfont=dict(family="Pretendard", color="white", size=18))
                 st.plotly_chart(fig_tree, use_container_width=True)
             else:
@@ -444,8 +439,8 @@ with tab2:
                 cat_counts_pie.columns = ['category', 'count']
                 fig_pie = px.pie(cat_counts_pie, values='count', names='category', hole=0.5, 
                                  color_discrete_sequence=[PURPLE_PALETTE[x] for x in [500, 600, 700, 800, 900]])
-                # [수정] 차트 배경색을 헥스 코드로 직접 지정하여 NameError 우회
-                fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20), paper_bgcolor=PLOTLY_BG_HEX, plot_bgcolor=PLOTLY_BG_HEX)
+                # [수정] 차트 배경색을 PLOTLY_BG_HEX로 직접 지정하여 NameError 우회
+                fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20), paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR, template="plotly_dark")
                 st.plotly_chart(fig_pie, use_container_width=True)
             else:
                 st.info("데이터 부족")
@@ -460,12 +455,12 @@ with tab2:
                     text=kw_counts['count'], textposition='outside',
                     marker=dict(color=PURPLE_PALETTE[600])
                 ))
-                # [수정] 차트 배경색을 헥스 코드로 직접 지정하여 NameError 우회
+                # [수정] 차트 배경색을 PLOTLY_BG_HEX로 직접 지정하여 NameError 우회
                 fig_bar.update_layout(
                     xaxis=dict(showgrid=False, visible=False), 
                     yaxis=dict(showgrid=False, autorange="reversed"),
                     height=350, margin=dict(t=20, b=20, l=10, r=40),
-                    paper_bgcolor=PLOTLY_BG_HEX, plot_bgcolor=PLOTLY_BG_HEX
+                    paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR, template="plotly_dark"
                 )
                 st.plotly_chart(fig_bar, use_container_width=True)
             else:
