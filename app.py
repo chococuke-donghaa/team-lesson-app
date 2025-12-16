@@ -4,6 +4,7 @@ import json
 import datetime
 import google.generativeai as genai
 import plotly.express as px
+import plotly.graph_objects as go # Plotly Go 복원
 import uuid
 import time
 from streamlit_gsheets import GSheetsConnection
@@ -14,7 +15,7 @@ from streamlit_gsheets import GSheetsConnection
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
 CARD_BG_COLOR = "#0E1117"
 
-# 모델 우선순위
+# 모델 우선순위 (쿼터 관리)
 MODEL_PRIORITY_LIST = [
     "gemini-2.5-flash",       
     "gemini-2.5-flash-lite",  
@@ -49,7 +50,6 @@ def load_data():
                 df[col] = ""
 
         if 'date' in df.columns:
-            # 날짜를 datetime 객체로 변환 (time part 제거)
             df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.normalize()
         
         df = df.fillna("")
@@ -165,7 +165,6 @@ def analyze_text(text):
 def get_current_week_dates():
     """현재 주(월요일 ~ 일요일)의 시작일과 종료일을 반환합니다."""
     today = datetime.date.today()
-    # today.weekday()는 월요일(0)부터 일요일(6)까지
     start_of_week = today - datetime.timedelta(days=today.weekday())
     end_of_week = start_of_week + datetime.timedelta(days=6)
     return pd.Timestamp(start_of_week).normalize(), pd.Timestamp(end_of_week).normalize()
@@ -285,7 +284,7 @@ with tab1:
     st.markdown("---")
     
     # --------------------------------------------------
-    # 2. 기록 목록 및 필터링
+    # 2. 기록 목록 및 필터링 (Tab 1 전용)
     # --------------------------------------------------
     st.subheader("🔍 기록 조회")
     
@@ -295,12 +294,13 @@ with tab1:
         col_filter1, col_filter2 = st.columns([1, 1])
         
         with col_filter1:
-            writer_filter = st.selectbox("작성자 필터", all_writers, index=0)
+            # key를 지정하여 세션 상태 충돌 방지
+            writer_filter = st.selectbox("작성자 필터", all_writers, index=0, key="tab1_writer_filter")
             
         with col_filter2:
             # 날짜 필터 (초기값: 오늘 날짜)
             default_date = datetime.date.today()
-            date_filter = st.date_input("특정 날짜", value=default_date)
+            date_filter = st.date_input("특정 날짜", value=default_date, key="tab1_date_filter")
 
         
         # 필터링 로직
@@ -316,20 +316,19 @@ with tab1:
         is_filtered_by_user = (writer_filter != "전체") or (date_filter != default_date)
         
         if is_filtered_by_user:
-            filtered_df = df.copy() # 전체 데이터셋으로 시작
+            # 사용자가 필터를 건 경우, 전체 데이터셋에서 시작
+            filtered_df = df.copy()
             
-            # 작성자 필터 적용
             if writer_filter != "전체":
                 filtered_df = filtered_df[filtered_df['writer'] == writer_filter]
                 
-            # 날짜 필터 적용
             if date_filter != default_date:
-                # date_filter는 date 객체이므로 normalize된 date 컬럼과 비교 가능
                 date_filter_ts = pd.Timestamp(date_filter).normalize()
                 filtered_df = filtered_df[filtered_df['date'] == date_filter_ts]
 
             st.caption(f"**필터링**된 기록 (총 {len(filtered_df)}건)")
         else:
+            # 필터가 걸리지 않은 경우, 이번 주 기록만 보여줌
             st.caption(f"**이번 주 기록** (총 {len(filtered_df)}건, {current_week_start.date()} ~ {current_week_end.date()})")
 
         # 목록 출력
@@ -337,25 +336,28 @@ with tab1:
             filtered_df = filtered_df.sort_values(by="date", ascending=False)
             
             for idx, row in filtered_df.iterrows():
-                with st.expander(f"[{row['date'].strftime('%Y-%m-%d')}] {row['writer']}의 기록"):
+                # [오류 해결] expender key 대신, expender 내부에 unique key 사용
+                expander_key = f"exp_{row['id']}_{idx}"
+                with st.expander(f"[{row['date'].strftime('%Y-%m-%d')}] **{row['writer']}**의 기록", expanded=False):
                     st.markdown(row['text'])
                     # 태그 표시
                     cats = parse_categories(row['category'])
                     try: kws = json.loads(row['keywords'])
                     except: kws = []
-                    badges = " ".join([f'<span style="background-color:#444; color:white; padding:3px 6px; border-radius:10px; font-size:0.8rem;">{c}</span>' for c in cats])
-                    badges += " " + " ".join([f'<span style="background-color:#30333F; color:#CCC; padding:3px 6px; border-radius:10px; font-size:0.8rem;">{k}</span>' for k in kws])
+                    
+                    badges = "".join([f'<span style="background-color:{PURPLE_PALETTE[800]}; color:white; padding:3px 6px; border-radius:10px; font-size:0.8rem;">{c}</span>' for c in cats])
+                    badges += " " + "".join([f'<span style="background-color:#30333F; color:#CCC; padding:3px 6px; border-radius:10px; font-size:0.8rem;">{k}</span>' for k in kws])
                     st.markdown(f"<div style='margin-top:10px;'>{badges}</div>", unsafe_allow_html=True)
                     
                     # 수정/삭제 버튼 (expander 내부)
                     bc1, bc2 = st.columns([1, 1])
                     with bc1:
-                        if st.button("수정", key=f"edit_recent_{row['id']}"):
+                        if st.button("수정", key=f"edit_tab1_{row['id']}"):
                             st.session_state['edit_mode'] = True
                             st.session_state['edit_data'] = row.to_dict()
                             st.rerun()
                     with bc2:
-                        if st.button("삭제", key=f"del_recent_{row['id']}"):
+                        if st.button("삭제", key=f"del_tab1_{row['id']}"):
                             confirm_delete_dialog(row['id'])
         else:
             if is_filtered_by_user:
@@ -395,7 +397,7 @@ with tab2:
             st.metric("누적 키워드", f"{len(set(all_kws))}개")
             st.metric("최다 작성자", top_writer)
 
-        # 2. 시각화 (단순 뷰어, 클릭 이벤트 제거)
+        # 2. 시각화 (순수 뷰어)
         with row1_col2:
             st.subheader("📊 Insight Visuals")
             v_col1, v_col2 = st.columns(2)
@@ -420,21 +422,15 @@ with tab2:
                     st.info("데이터 부족")
 
             with v_col2:
-                st.caption("Top Keywords")
-                if all_kws:
-                    kw_counts = pd.Series(all_kws).value_counts().head(7).reset_index()
-                    kw_counts.columns = ['keyword', 'count']
-                    fig_bar = px.bar(kw_counts, x='count', y='keyword', orientation='h', text='count')
-                    fig_bar.update_traces(marker_color=PURPLE_PALETTE[600], textposition='outside')
-                    fig_bar.update_layout(
-                        yaxis=dict(autorange="reversed"), 
-                        xaxis=dict(visible=False),
-                        margin=dict(t=0, l=0, r=0, b=0), 
-                        height=300, 
-                        paper_bgcolor=CARD_BG_COLOR,
-                        plot_bgcolor=CARD_BG_COLOR
-                    )
-                    st.plotly_chart(fig_bar, use_container_width=True)
+                # [복원] 파이 차트 복원
+                st.caption("Category Ratio")
+                if all_cats_flat:
+                    cat_counts_pie = pd.Series(all_cats_flat).value_counts().reset_index()
+                    cat_counts_pie.columns = ['category', 'count']
+                    fig_pie = px.pie(cat_counts_pie, values='count', names='category', hole=0.5, 
+                                     color_discrete_sequence=[PURPLE_PALETTE[x] for x in [500, 600, 700, 800, 900]])
+                    fig_pie.update_layout(height=300, margin=dict(t=0, b=0, l=0, r=0), paper_bgcolor=CARD_BG_COLOR)
+                    st.plotly_chart(fig_pie, use_container_width=True)
                 else:
                     st.info("데이터 부족")
 
@@ -460,7 +456,6 @@ with tab2:
         if selected_cat_filter == "전체 보기":
             filtered_df_dash = df.copy()
         else:
-            # 각 행의 category 리스트에 선택된 카테고리가 있는지 확인
             filtered_df_dash = df[df['category'].apply(lambda x: selected_cat_filter in parse_categories(x))]
         
         # 목록 출력
@@ -481,7 +476,7 @@ with tab2:
                             if st.button("수정", key=f"edit_dash_{row['id']}"):
                                 st.session_state['edit_mode'] = True
                                 st.session_state['edit_data'] = row.to_dict()
-                                st.switch_page("app.py") # 탭 이동 효과를 위해 리런
+                                st.rerun() # 현재 탭에서 수정 모드로 전환
                         with bc2:
                             if st.button("삭제", key=f"del_dash_{row['id']}"):
                                 confirm_delete_dialog(row['id'])
@@ -495,7 +490,6 @@ with tab2:
                     except: kws = []
                     
                     badges = ""
-                    # 필터 선택된 카테고리는 강조
                     for c in cats:
                         bg = PURPLE_PALETTE[800] if c == selected_cat_filter else "#444"
                         badges += f'<span style="background-color:{bg}; color:white; padding:4px 8px; border-radius:12px; font-size:0.75rem; margin-right:5px;">{c}</span>'
