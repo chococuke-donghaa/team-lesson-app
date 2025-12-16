@@ -313,36 +313,28 @@ with tab1:
         form_writer = ""
         form_text = ""
         form_date = datetime.date.today()
+        
+    # [수정] 취소 버튼을 폼 바깥에 배치하여 오류 회피
+    if st.session_state['edit_mode']:
+        col_outside_cancel, col_outside_dummy = st.columns([1, 3])
+        with col_outside_cancel:
+            if st.button("취소하고 새 글 쓰기", key="cancel_edit_outside", use_container_width=True):
+                st.session_state['edit_mode'] = False
+                st.session_state['edit_data'] = {}
+                st.rerun()
+
 
     with st.form("record_form", clear_on_submit=True):
         c_input1, c_input2 = st.columns([1, 1])
         with c_input1:
-            writer = st.text_input("작성자", value=form_writer, placeholder="이름 입력")
+            writer = st.text_input("작성자", value=form_writer, placeholder="이름 입력", key="form_writer")
         with c_input2:
-            selected_date = st.date_input("날짜", value=form_date)
+            selected_date = st.date_input("날짜", value=form_date, key="form_date")
         
-        text = st.text_area("내용 (Markdown 지원)", value=form_text, height=150, placeholder="배운 점, 문제 해결 과정 등을 자유롭게 적어주세요. AI가 자동으로 태그를 달아줍니다.")
+        text = st.text_area("내용 (Markdown 지원)", value=form_text, height=150, placeholder="배운 점, 문제 해결 과정 등을 자유롭게 적어주세요. AI가 자동으로 태그를 달아줍니다.", key="form_text")
         
         if st.session_state['edit_mode']:
-            col_cancel, col_submit = st.columns([1, 1])
-            with col_cancel:
-                # [수정] 폼 바깥으로 버튼을 뺐기 때문에, 여기서는 st.form_submit_button만 남겨야 함.
-                # 그러나 사용자가 원하는 '취소' 버튼을 폼 제출 영역과 함께 배치해야 하므로,
-                # 폼 제출 로직은 폼 바깥에서 처리할 수 없음.
-                # *해결책: 폼 바깥에 취소 버튼을 두고, 폼 안에는 제출 버튼만 둠.*
-                st.form_submit_button("취소 (새 글 쓰기)", type="secondary", use_container_width=True, key="cancel_submit_dummy") # 더미 버튼
-            with col_submit:
-                submitted = st.form_submit_button("수정 완료", type="primary", use_container_width=True)
-            
-            # [수정] '취소하고 새 글 쓰기' 버튼 로직을 폼 바깥에 배치하여 오류 회피 및 좌우 정렬
-            col_outside_cancel, col_outside_dummy = st.columns([1, 1])
-            with col_outside_cancel:
-                if st.button("취소하고 새 글 쓰기", key="cancel_edit_outside", use_container_width=True):
-                    st.session_state['edit_mode'] = False
-                    st.session_state['edit_data'] = {}
-                    st.rerun()
-            # 폼 내부 제출 버튼과 디자인을 맞추기 위한 더미 컬럼 (st.form_submit_button이 이미 submit을 처리함)
-
+            submitted = st.form_submit_button("수정 완료", type="primary", use_container_width=True)
         else:
             submitted = st.form_submit_button("기록 저장하기", type="primary", use_container_width=True)
 
@@ -425,7 +417,7 @@ with tab1:
             
             for idx, row in filtered_df.iterrows():
                 with st.container(border=True):
-                    # [수정] 수직 가운데 정렬 및 마크다운 오류 해결
+                    # [요청 반영] 이름 / 작성일 / 수정 / 삭제 구성 및 수직 중앙 정렬
                     col_info, col_btn_edit, col_btn_del = st.columns([6, 1, 1])
                     
                     date_str = row['date'].strftime('%Y-%m-%d')
