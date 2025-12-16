@@ -360,7 +360,7 @@ with tab1:
     # --------------------------------------------------
     # 2. 기록 목록 및 필터링 (Tab 1 전용)
     # --------------------------------------------------
-    st.subheader("🔍 기록 조회")
+    st.subheader("🔍 이주의 레슨런")
     
     if not df.empty:
         # 필터 위젯 설정
@@ -372,7 +372,7 @@ with tab1:
             
         with col_filter2:
             default_date = datetime.date.today()
-            date_filter = st.date_input("특정 날짜", value=default_date, key="tab1_date_filter")
+            date_filter = st.date_input("작성 날짜", value=default_date, key="tab1_date_filter")
 
         
         # 필터링 로직
@@ -490,7 +490,7 @@ with tab2:
         st.divider() 
         
         # 2. 트리맵 (Lesson Map) - 풀 너비
-        st.subheader("🗺️ Lesson Map (카테고리 비중)")
+        st.subheader("🗺️ Lesson Map")
         st.caption("가장 많은 기록이 있는 카테고리를 시각적으로 보여줍니다.")
         if all_cats_flat:
             cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
@@ -515,7 +515,7 @@ with tab2:
         st.divider()
         
         # 3. 파이 차트 & 바 차트
-        st.subheader("📊 상세 분석")
+        st.subheader("📊 Keyword")
         col_pie, col_bar = st.columns(2)
 
         with col_pie:
