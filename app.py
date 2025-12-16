@@ -4,7 +4,6 @@ import json
 import datetime
 import google.generativeai as genai
 import plotly.express as px
-import plotly.graph_objects as go
 import uuid
 import time
 from streamlit_gsheets import GSheetsConnection
@@ -15,8 +14,9 @@ from streamlit_gsheets import GSheetsConnection
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
 CARD_BG_COLOR = "#0E1117"
 
-# 모델 우선순위
+# 모델 우선순위 (쿼터 관리)
 MODEL_PRIORITY_LIST = [
+    "gemini-2.0-flash",
     "gemini-2.5-flash",       
     "gemini-2.5-flash-lite",  
     "gemini-1.5-flash"        
@@ -358,7 +358,8 @@ with tab2:
                     cat_counts.columns = ['Category', 'Value']
                     
                     if not cat_counts.empty:
-                        # [핵심] custom_data를 사용하여 카테고리 이름을 명시적으로 전달
+                        # [핵심] px.treemap에 custom_data=['Category'] 추가
+                        # 이렇게 해야 클릭 시 카테고리 이름을 안전하게 전달받을 수 있음
                         fig_tree = px.treemap(
                             cat_counts, 
                             path=['Category'], 
@@ -369,7 +370,7 @@ with tab2:
                                 (0.5, PURPLE_PALETTE[600]), 
                                 (1.0, PURPLE_PALETTE[900])
                             ],
-                            custom_data=['Category'] # 클릭 시 이 데이터를 참조함
+                            custom_data=['Category'] 
                         )
                         fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=450, paper_bgcolor=CARD_BG_COLOR)
                         fig_tree.update_traces(
@@ -386,23 +387,23 @@ with tab2:
                     st.info("시각화할 카테고리 데이터가 없습니다.")
                     event = None
         
-        # --- [상세보기] 클릭 시 하단에 리스트 노출 ---
+        # --- [상세보기] 클릭 로직 (안전한 방식) ---
         st.markdown("---")
-        
         selected_category = None
         
-        # [핵심 수정] points에서 customdata를 우선적으로 찾도록 로직 변경 (가장 안전한 방법)
+        # [수정됨] points 내부를 안전하게 확인
         if event and event.selection and "points" in event.selection:
-            for point in event.selection.points:
-                # customdata가 있으면 그것을 사용
+            # points 리스트가 비어있지 않은지 확인
+            if len(event.selection.points) > 0:
+                point = event.selection.points[0]
+                # customdata가 있는지 확인
                 if "customdata" in point:
-                    # px.treemap은 customdata를 리스트로 감싸서 반환함
-                    selected_category = point["customdata"][0]
-                    break
-                # 만약 customdata가 없다면 label을 사용 (보조 수단)
-                elif "label" in point:
-                    selected_category = point["label"]
-                    break
+                    # px는 리스트로 감싸서 줌
+                    data = point["customdata"]
+                    if isinstance(data, list) and len(data) > 0:
+                        selected_category = data[0]
+                    else:
+                        selected_category = data
         
         if selected_category:
             st.subheader(f"📂 '{selected_category}' 카테고리 모아보기")
