@@ -16,7 +16,6 @@ CARD_BG_COLOR = "#0E1117"
 
 # 모델 우선순위
 MODEL_PRIORITY_LIST = [
-    "gemini-2.0-flash",
     "gemini-2.5-flash",       
     "gemini-2.5-flash-lite",  
     "gemini-1.5-flash"        
@@ -50,7 +49,8 @@ def load_data():
                 df[col] = ""
 
         if 'date' in df.columns:
-            df['date'] = pd.to_datetime(df['date'], errors='coerce')
+            # 날짜를 datetime 객체로 변환 (time part 제거)
+            df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.normalize()
         
         df = df.fillna("")
         return df
@@ -74,7 +74,7 @@ def save_entry(writer, text, keywords, categories, date_val):
 
     new_data = pd.DataFrame({
         "id": [str(uuid.uuid4())],
-        "date": [pd.to_datetime(date_val)],
+        "date": [pd.to_datetime(date_val).normalize()],
         "writer": [writer],
         "text": [text],
         "keywords": [json.dumps(keywords, ensure_ascii=False)],
@@ -96,7 +96,7 @@ def update_entry(entry_id, writer, text, keywords, categories, date_val):
         df.at[idx[0], 'text'] = text
         df.at[idx[0], 'keywords'] = json.dumps(keywords, ensure_ascii=False)
         df.at[idx[0], 'category'] = cat_str
-        df.at[idx[0], 'date'] = pd.to_datetime(date_val)
+        df.at[idx[0], 'date'] = pd.to_datetime(date_val).normalize()
         save_data_to_sheet(df)
 
 def delete_entry(entry_id):
@@ -117,6 +117,9 @@ def parse_categories(cat_data):
 # 2. AI 분석
 # -----------------------------------------------------------------------------
 def analyze_text(text):
+    if GOOGLE_API_KEY == "YOUR_API_KEY":
+        return ["#API_KEY_없음"], ["기타"], "None"
+        
     genai.configure(api_key=GOOGLE_API_KEY)
     for model_name in MODEL_PRIORITY_LIST:
         try:
@@ -149,23 +152,23 @@ def analyze_text(text):
             if not kws: kws = ["#일반"]
             if isinstance(cats, str): cats = [cats]
             
-            print(f"✅ Success with {model_name}")
+            # print(f"✅ Success with {model_name}")
             return kws, cats, model_name
 
         except Exception as e:
-            print(f"⚠️ {model_name} failed: {e}")
+            # print(f"⚠️ {model_name} failed: {e}")
             time.sleep(1) 
             continue
     return ["#AI오류"], ["기타"], "None"
 
-def get_month_week_str(date_obj):
-    try:
-        if pd.isna(date_obj): return ""
-        if isinstance(date_obj, str): date_obj = pd.to_datetime(date_obj)
-        week_num = (date_obj.day - 1) // 7 + 1
-        return f"{date_obj.strftime('%y')}년 {date_obj.month}월 {week_num}주차"
-    except:
-        return ""
+
+def get_current_week_dates():
+    """현재 주(월요일 ~ 일요일)의 시작일과 종료일을 반환합니다."""
+    today = datetime.date.today()
+    # today.weekday()는 월요일(0)부터 일요일(6)까지
+    start_of_week = today - datetime.timedelta(days=today.weekday())
+    end_of_week = start_of_week + datetime.timedelta(days=6)
+    return pd.Timestamp(start_of_week).normalize(), pd.Timestamp(end_of_week).normalize()
 
 # -----------------------------------------------------------------------------
 # 3. Streamlit UI
@@ -213,8 +216,15 @@ with col_head2:
 
 tab1, tab2 = st.tabs(["📝 배움 기록하기", "📊 통합 대시보드"])
 
-# --- TAB 1: 입력 ---
+# ==============================================================================
+# TAB 1: 입력 및 필터링된 기록
+# ==============================================================================
 with tab1:
+    df = load_data()
+    
+    # --------------------------------------------------
+    # 1. 기록/수정 폼
+    # --------------------------------------------------
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
         if st.button("취소하고 새 글 쓰기"):
@@ -225,15 +235,15 @@ with tab1:
         form_writer = st.session_state['edit_data'].get('writer', '')
         form_text = st.session_state['edit_data'].get('text', '')
         saved_date = st.session_state['edit_data'].get('date')
-        if isinstance(saved_date, (pd.Timestamp, datetime.datetime)):
+        if isinstance(saved_date, (pd.Timestamp, datetime.datetime, datetime.date)):
             form_date = saved_date.date()
         else:
-            form_date = datetime.datetime.now().date()
+            form_date = datetime.date.today()
     else:
         st.subheader("이번주의 레슨런을 기록해주세요")
         form_writer = ""
         form_text = ""
-        form_date = datetime.datetime.now().date()
+        form_date = datetime.date.today()
 
     with st.form("record_form", clear_on_submit=True):
         c_input1, c_input2 = st.columns([1, 1])
@@ -244,7 +254,7 @@ with tab1:
         
         text = st.text_area("내용 (Markdown 지원)", value=form_text, height=150, placeholder="배운 점, 문제 해결 과정 등을 자유롭게 적어주세요. AI가 자동으로 태그를 달아줍니다.")
         
-        submitted = st.form_submit_button("수정 완료" if st.session_state['edit_mode'] else "기록 저장하기", use_container_width=True)
+        submitted = st.form_submit_button("수정 완료" if st.session_state['edit_mode'] else "기록 저장하기", type="primary", use_container_width=True)
         
         if submitted:
             if not writer or not text:
@@ -252,39 +262,113 @@ with tab1:
             else:
                 with st.spinner("✨ AI 분석 및 저장 중..."):
                     ai_keywords, ai_cats, used_model = analyze_text(text)
-                    if used_model == "None":
+                    if used_model == "None" and GOOGLE_API_KEY != "YOUR_API_KEY":
                          st.error("AI 모델 연결 실패. 잠시 후 다시 시도해주세요.")
+                    elif GOOGLE_API_KEY == "YOUR_API_KEY":
+                        st.warning("API 키가 없어 자동 분석은 건너뛰었습니다. (태그: #API_KEY_없음)")
+                        ai_keywords, ai_cats = ["#API_KEY_없음"], ["기타"]
+                        used_model = "Manual"
+                    
+                    if st.session_state['edit_mode']:
+                        update_entry(
+                            st.session_state['edit_data']['id'], 
+                            writer, text, ai_keywords, ai_cats, selected_date
+                        )
+                        st.success(f"✅ 수정 완료! (Model: {used_model})")
+                        st.session_state['edit_mode'] = False
+                        st.session_state['edit_data'] = {}
+                        st.rerun()
                     else:
-                        if st.session_state['edit_mode']:
-                            update_entry(
-                                st.session_state['edit_data']['id'], 
-                                writer, text, ai_keywords, ai_cats, selected_date
-                            )
-                            st.success(f"✅ 수정 완료! (Model: {used_model})")
-                            st.session_state['edit_mode'] = False
-                            st.session_state['edit_data'] = {}
-                            st.rerun()
-                        else:
-                            save_entry(writer, text, ai_keywords, ai_cats, selected_date)
-                            st.success(f"✅ 저장 완료! (태그: {', '.join(ai_cats)} / Model: {used_model})")
+                        save_entry(writer, text, ai_keywords, ai_cats, selected_date)
+                        st.success(f"✅ 저장 완료! (태그: {', '.join(ai_cats)} / Model: {used_model})")
 
     st.markdown("---")
     
     # --------------------------------------------------
-    # [입력 탭 하단] 전체 기록 목록 (간단히 보기)
+    # 2. 기록 목록 및 필터링
     # --------------------------------------------------
-    df = load_data()
-    st.subheader("📜 최근 기록")
+    st.subheader("🔍 기록 조회")
+    
     if not df.empty:
-        df_sorted = df.sort_values(by="date", ascending=False).head(5)
-        for idx, row in df_sorted.iterrows():
-            with st.expander(f"{row['writer']} - {str(row['date'])[:10]}"):
-                st.markdown(row['text'])
+        # 필터 위젯 설정
+        all_writers = ["전체"] + sorted(df['writer'].unique().tolist())
+        col_filter1, col_filter2 = st.columns([1, 1])
+        
+        with col_filter1:
+            writer_filter = st.selectbox("작성자 필터", all_writers, index=0)
+            
+        with col_filter2:
+            # 날짜 필터 (초기값: 오늘 날짜)
+            default_date = datetime.date.today()
+            date_filter = st.date_input("특정 날짜", value=default_date)
+
+        
+        # 필터링 로직
+        current_week_start, current_week_end = get_current_week_dates()
+        
+        # 1. 기본 필터 (이번 주)
+        filtered_df = df[
+            (df['date'] >= current_week_start) & 
+            (df['date'] <= current_week_end)
+        ].copy()
+        
+        # 2. 작성자 또는 날짜 필터가 적용된 경우 전체 데이터 대상으로 필터링
+        is_filtered_by_user = (writer_filter != "전체") or (date_filter != default_date)
+        
+        if is_filtered_by_user:
+            filtered_df = df.copy() # 전체 데이터셋으로 시작
+            
+            # 작성자 필터 적용
+            if writer_filter != "전체":
+                filtered_df = filtered_df[filtered_df['writer'] == writer_filter]
+                
+            # 날짜 필터 적용
+            if date_filter != default_date:
+                # date_filter는 date 객체이므로 normalize된 date 컬럼과 비교 가능
+                date_filter_ts = pd.Timestamp(date_filter).normalize()
+                filtered_df = filtered_df[filtered_df['date'] == date_filter_ts]
+
+            st.caption(f"**필터링**된 기록 (총 {len(filtered_df)}건)")
+        else:
+            st.caption(f"**이번 주 기록** (총 {len(filtered_df)}건, {current_week_start.date()} ~ {current_week_end.date()})")
+
+        # 목록 출력
+        if not filtered_df.empty:
+            filtered_df = filtered_df.sort_values(by="date", ascending=False)
+            
+            for idx, row in filtered_df.iterrows():
+                with st.expander(f"[{row['date'].strftime('%Y-%m-%d')}] {row['writer']}의 기록"):
+                    st.markdown(row['text'])
+                    # 태그 표시
+                    cats = parse_categories(row['category'])
+                    try: kws = json.loads(row['keywords'])
+                    except: kws = []
+                    badges = " ".join([f'<span style="background-color:#444; color:white; padding:3px 6px; border-radius:10px; font-size:0.8rem;">{c}</span>' for c in cats])
+                    badges += " " + " ".join([f'<span style="background-color:#30333F; color:#CCC; padding:3px 6px; border-radius:10px; font-size:0.8rem;">{k}</span>' for k in kws])
+                    st.markdown(f"<div style='margin-top:10px;'>{badges}</div>", unsafe_allow_html=True)
+                    
+                    # 수정/삭제 버튼 (expander 내부)
+                    bc1, bc2 = st.columns([1, 1])
+                    with bc1:
+                        if st.button("수정", key=f"edit_recent_{row['id']}"):
+                            st.session_state['edit_mode'] = True
+                            st.session_state['edit_data'] = row.to_dict()
+                            st.rerun()
+                    with bc2:
+                        if st.button("삭제", key=f"del_recent_{row['id']}"):
+                            confirm_delete_dialog(row['id'])
+        else:
+            if is_filtered_by_user:
+                st.info("선택한 조건에 맞는 기록이 없습니다.")
+            else:
+                st.info("이번 주에 작성된 기록이 없습니다.")
     else:
         st.info("아직 기록이 없습니다.")
 
 
-# --- TAB 2: 대시보드 ---
+# ==============================================================================
+# TAB 2: 대시보드 및 전체 목록 (카테고리 필터)
+# ==============================================================================
 with tab2:
     df = load_data()
     if not df.empty:
@@ -311,7 +395,7 @@ with tab2:
             st.metric("누적 키워드", f"{len(set(all_kws))}개")
             st.metric("최다 작성자", top_writer)
 
-        # 2. 시각화 (트리맵 + 파이)
+        # 2. 시각화 (단순 뷰어, 클릭 이벤트 제거)
         with row1_col2:
             st.subheader("📊 Insight Visuals")
             v_col1, v_col2 = st.columns(2)
@@ -357,35 +441,34 @@ with tab2:
         st.divider()
 
         # ----------------------------------------------------------
-        # [핵심 기능] 3. 전체 목록 필터링 (Filterable List)
+        # 3. 전체 목록 필터링 (Category Filter)
         # ----------------------------------------------------------
         st.subheader("🗂️ 전체 레슨런 목록 (카테고리 필터)")
         
-        # 필터 생성: 전체 카테고리 추출
         unique_categories = sorted(list(set(all_cats_flat)))
         
-        # 필터 위젯
         col_filter, col_empty = st.columns([1, 3])
         with col_filter:
             selected_cat_filter = st.selectbox(
                 "카테고리 선택", 
                 ["전체 보기"] + unique_categories,
-                index=0
+                index=0,
+                key="dashboard_cat_filter" # 키 충돌 방지
             )
         
         # 데이터 필터링 로직
         if selected_cat_filter == "전체 보기":
-            filtered_df = df
+            filtered_df_dash = df.copy()
         else:
             # 각 행의 category 리스트에 선택된 카테고리가 있는지 확인
-            filtered_df = df[df['category'].apply(lambda x: selected_cat_filter in parse_categories(x))]
+            filtered_df_dash = df[df['category'].apply(lambda x: selected_cat_filter in parse_categories(x))]
         
         # 목록 출력
-        if not filtered_df.empty:
-            filtered_df = filtered_df.sort_values(by="date", ascending=False)
-            st.caption(f"총 {len(filtered_df)}건의 기록이 있습니다.")
+        if not filtered_df_dash.empty:
+            filtered_df_dash = filtered_df_dash.sort_values(by="date", ascending=False)
+            st.caption(f"총 {len(filtered_df_dash)}건의 기록이 있습니다.")
             
-            for idx, row in filtered_df.iterrows():
+            for idx, row in filtered_df_dash.iterrows():
                 with st.container(border=True):
                     # 헤더: 날짜 | 작성자 | 수정/삭제 버튼
                     c1, c2 = st.columns([8, 2])
@@ -395,12 +478,12 @@ with tab2:
                     with c2:
                         bc1, bc2 = st.columns(2)
                         with bc1:
-                            if st.button("수정", key=f"edit_list_{row['id']}"):
+                            if st.button("수정", key=f"edit_dash_{row['id']}"):
                                 st.session_state['edit_mode'] = True
                                 st.session_state['edit_data'] = row.to_dict()
                                 st.switch_page("app.py") # 탭 이동 효과를 위해 리런
                         with bc2:
-                            if st.button("삭제", key=f"del_list_{row['id']}"):
+                            if st.button("삭제", key=f"del_dash_{row['id']}"):
                                 confirm_delete_dialog(row['id'])
                     
                     st.markdown("---")
