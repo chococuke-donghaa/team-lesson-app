@@ -28,8 +28,10 @@ DEFAULT_CATEGORIES = [
 
 PURPLE_PALETTE = {
     50: "#EEEFFF", 100: "#DFE1FF", 200: "#C6C7FF", 300: "#A3A3FE",
-    400: "#7E72FA", 500: "#7860F4", 600: "#6A43E8", 700: "#5B35CD",
-    800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
+    400: "#7E72FA", # <-- 옅은 파란색/청자색 (키워드 텍스트)
+    500: "#7860F4", 600: "#6A43E8", 700: "#5B35CD",
+    800: "#4A2EA5", # <-- 보라색 (카테고리 라벨 배경)
+    900: "#3F2C83", 950: "#261A4C"
 }
 
 def get_connection():
@@ -204,11 +206,10 @@ st.markdown(f"""
     
     /* Plotly는 template="plotly_dark"를 사용 */
     
-    /* [수정] 태그 아래 마진(여백) 추가 */
+    /* [수정] 태그 아래 마진(여백) 및 키워드 폰트/색상 설정 */
     .tag-container {{
         margin-top: 10px;
-        margin-bottom: 20px; /* 다음 기록과의 간격 확보 */
-        color: {PURPLE_PALETTE[400]}; /* 키워드 텍스트 색상 */
+        margin-bottom: 20px; 
     }}
     
     /* 이름/버튼 아래 가로줄 마진 조정 */
@@ -232,7 +233,6 @@ st.markdown(f"""
     }}
     
     /* [수정] 수직 가운데 정렬을 위한 flexbox 적용 */
-    /* col_info와 col_btn들이 있는 stHorizontalBlock 컨테이너에 적용 */
     div[data-testid="stHorizontalBlock"] {{
         align-items: center; /* 수직 가운데 정렬 */
     }}
@@ -249,13 +249,31 @@ st.markdown(f"""
     .writer-name {{
         font-weight: bold;
         font-size: 1.05rem; /* 이름 폰트 크기 */
+        color: white;
     }}
     .date-info {{
-        color: #777;
+        color: #9CA3AF; /* 회색 계열 */
         font-size: 0.9em;
         margin-left: 10px;
     }}
 
+    /* [신규] 카테고리 라벨 스타일 */
+    .cat-badge {{
+        background-color: {PURPLE_PALETTE[800]}; /* 보라색 배경 */
+        color: white;
+        padding: 3px 6px;
+        border-radius: 10px;
+        font-size: 0.8rem; /* 폰트 크기 통일 */
+        font-weight: 500;
+        margin-right: 5px;
+    }}
+
+    /* [신규] 키워드 텍스트 스타일 */
+    .keyword-text {{
+        color: {PURPLE_PALETTE[400]}; /* 옅은 파란색/청자색 */
+        font-size: 0.8rem; /* 폰트 크기 통일 */
+        font-weight: 500;
+    }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -425,12 +443,12 @@ with tab1:
                     # [수정] 키워드를 #이 붙은 텍스트로 변경
                     keyword_text = " ".join([f"#{k}" for k in kws])
                     
-                    # 카테고리 (작은 뱃지 형태 유지, 색상만 어둡게)
-                    cat_badges = "".join([f'<span style="background-color:#444; color:#CCC; padding:3px 6px; border-radius:10px; font-size:0.8rem; margin-right:5px;">{c}</span>' for c in cats])
+                    # 카테고리 (작은 뱃지 형태 유지, 보라색 배경)
+                    cat_badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
                     
                     
                     # 태그 아래 마진을 위해 .tag-container 사용
-                    st.markdown(f"<div class='tag-container'>{cat_badges} <span style='font-weight: 500;'>{keyword_text}</span></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='tag-container'>{cat_badges} <span class='keyword-text'>{keyword_text}</span></div>", unsafe_allow_html=True)
         else:
             if is_filtered_by_user:
                 st.info("선택한 조건에 맞는 기록이 없습니다.")
@@ -588,12 +606,12 @@ with tab2:
                     # [수정] 키워드를 #이 붙은 텍스트로 변경
                     keyword_text = " ".join([f"#{k}" for k in kws])
                     
-                    # 카테고리 (작은 뱃지 형태 유지, 색상만 어둡게)
-                    cat_badges = "".join([f'<span style="background-color:#444; color:#CCC; padding:3px 6px; border-radius:10px; font-size:0.8rem; margin-right:5px;">{c}</span>' for c in cats])
+                    # 카테고리 (작은 뱃지 형태 유지, 보라색 배경)
+                    cat_badges = "".join([f'<span class="cat-badge" style="background-color:{PURPLE_PALETTE[800]};">{c}</span>' for c in cats])
                     
                     
                     # 태그 아래 마진을 위해 .tag-container 사용
-                    st.markdown(f"<div class='tag-container'>{cat_badges} <span style='font-weight: 500;'>{keyword_text}</span></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='tag-container'>{cat_badges} <span class='keyword-text'>{keyword_text}</span></div>", unsafe_allow_html=True)
         else:
             st.info("해당 카테고리의 글이 없습니다.")
 
