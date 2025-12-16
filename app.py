@@ -209,7 +209,7 @@ st.markdown(f"""
     /* [수정] 태그 아래 마진(여백) 및 키워드 폰트/색상 설정 */
     .tag-container {{
         margin-top: 10px;
-        margin-bottom: 20px; 
+        margin-bottom: 20px; /* 다음 기록과의 간격 확보 */
     }}
     
     /* 이름/버튼 아래 가로줄 마진 조정 */
@@ -257,7 +257,7 @@ st.markdown(f"""
         margin-left: 10px;
     }}
 
-    /* [신규] 카테고리 라벨 스타일 */
+    /* [신규] 카테고리 라벨 스타일 (보라색) */
     .cat-badge {{
         background-color: {PURPLE_PALETTE[800]}; /* 보라색 배경 */
         color: white;
@@ -268,7 +268,7 @@ st.markdown(f"""
         margin-right: 5px;
     }}
 
-    /* [신규] 키워드 텍스트 스타일 */
+    /* [신규] 키워드 텍스트 스타일 (옅은 파란색) */
     .keyword-text {{
         color: {PURPLE_PALETTE[400]}; /* 옅은 파란색/청자색 */
         font-size: 0.8rem; /* 폰트 크기 통일 */
@@ -300,11 +300,9 @@ with tab1:
     # --------------------------------------------------
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
-        if st.button("취소하고 새 글 쓰기"):
-            st.session_state['edit_mode'] = False
-            st.session_state['edit_data'] = {}
-            st.rerun()
-            
+        
+        # [요청 반영] 취소하고 새 글 쓰기 버튼을 폼 하단으로 이동 및 좌우 배치
+        
         form_writer = st.session_state['edit_data'].get('writer', '')
         form_text = st.session_state['edit_data'].get('text', '')
         saved_date = st.session_state['edit_data'].get('date')
@@ -327,8 +325,19 @@ with tab1:
         
         text = st.text_area("내용 (Markdown 지원)", value=form_text, height=150, placeholder="배운 점, 문제 해결 과정 등을 자유롭게 적어주세요. AI가 자동으로 태그를 달아줍니다.")
         
-        submitted = st.form_submit_button("수정 완료" if st.session_state['edit_mode'] else "기록 저장하기", type="primary", use_container_width=True)
-        
+        if st.session_state['edit_mode']:
+            col_cancel, col_submit = st.columns([1, 1])
+            with col_cancel:
+                if st.button("취소하고 새 글 쓰기", key="cancel_edit_bottom", use_container_width=True):
+                    st.session_state['edit_mode'] = False
+                    st.session_state['edit_data'] = {}
+                    st.rerun()
+            with col_submit:
+                submitted = st.form_submit_button("수정 완료", type="primary", use_container_width=True)
+        else:
+            submitted = st.form_submit_button("기록 저장하기", type="primary", use_container_width=True)
+
+
         if submitted:
             if not writer or not text:
                 st.error("작성자와 내용을 모두 입력해주세요.")
@@ -360,7 +369,7 @@ with tab1:
     # --------------------------------------------------
     # 2. 기록 목록 및 필터링 (Tab 1 전용)
     # --------------------------------------------------
-    st.subheader("🔍 이주의 레슨런")
+    st.subheader("🔍 기록 조회")
     
     if not df.empty:
         # 필터 위젯 설정
@@ -372,7 +381,7 @@ with tab1:
             
         with col_filter2:
             default_date = datetime.date.today()
-            date_filter = st.date_input("작성 날짜", value=default_date, key="tab1_date_filter")
+            date_filter = st.date_input("특정 날짜", value=default_date, key="tab1_date_filter")
 
         
         # 필터링 로직
@@ -406,7 +415,7 @@ with tab1:
             
             for idx, row in filtered_df.iterrows():
                 with st.container(border=True):
-                    # [수정] 수직 가운데 정렬 및 마크다운 오류 해결
+                    # [요청 반영] 이름 / 작성일 / 수정 / 삭제 구성 및 수직 중앙 정렬
                     col_info, col_btn_edit, col_btn_del = st.columns([6, 1, 1])
                     
                     date_str = row['date'].strftime('%Y-%m-%d')
@@ -490,7 +499,7 @@ with tab2:
         st.divider() 
         
         # 2. 트리맵 (Lesson Map) - 풀 너비
-        st.subheader("🗺️ Lesson Map")
+        st.subheader("🗺️ Lesson Map (카테고리 비중)")
         st.caption("가장 많은 기록이 있는 카테고리를 시각적으로 보여줍니다.")
         if all_cats_flat:
             cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
@@ -515,7 +524,7 @@ with tab2:
         st.divider()
         
         # 3. 파이 차트 & 바 차트
-        st.subheader("📊 Keyword")
+        st.subheader("📊 상세 분석")
         col_pie, col_bar = st.columns(2)
 
         with col_pie:
@@ -586,7 +595,7 @@ with tab2:
                     c1 = st.columns([1])[0]
                     with c1:
                         date_str = row['date'].strftime('%Y-%m-%d') if isinstance(row['date'], pd.Timestamp) else str(row['date'])[:10]
-                        # [수정] 마크다운 깨짐 방지
+                        # 순수 HTML/CSS로 스타일링 적용 (마크다운 오류 해결)
                         info_html = f"""
                         <div class='info-block'>
                             <span class='writer-name'>{row['writer']}</span>
@@ -607,7 +616,7 @@ with tab2:
                     keyword_text = " ".join([f"#{k}" for k in kws])
                     
                     # 카테고리 (작은 뱃지 형태 유지, 보라색 배경)
-                    cat_badges = "".join([f'<span class="cat-badge" style="background-color:{PURPLE_PALETTE[800]};">{c}</span>' for c in cats])
+                    cat_badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
                     
                     
                     # 태그 아래 마진을 위해 .tag-container 사용
