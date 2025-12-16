@@ -7,6 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import uuid
 import time
+import threading # AI 처리를 위한 스레딩 모듈 (Streamlit 환경에 맞게 조정 필요)
 from streamlit_gsheets import GSheetsConnection
 
 # -----------------------------------------------------------------------------
@@ -68,39 +69,79 @@ def save_data_to_sheet(df):
         save_df['date'] = pd.to_datetime(save_df['date']).dt.strftime('%Y-%m-%d')
     conn.update(data=save_df)
 
-def save_entry(writer, text, keywords, categories, date_val):
+def save_entry(entry_id, writer, text, keywords, categories, date_val):
     df = load_data()
+    
+    # 리스트 또는 단일 문자열을 JSON 문자열로 변환
     if isinstance(categories, list):
         cat_str = json.dumps(categories, ensure_ascii=False)
     else:
         cat_str = json.dumps([str(categories)], ensure_ascii=False)
+    
+    if isinstance(keywords, list):
+        kw_str = json.dumps(keywords, ensure_ascii=False)
+    else:
+        kw_str = json.dumps([str(keywords)], ensure_ascii=False)
+
 
     new_data = pd.DataFrame({
-        "id": [str(uuid.uuid4())],
+        "id": [entry_id],
         "date": [pd.to_datetime(date_val).normalize()],
         "writer": [writer],
         "text": [text],
-        "keywords": [json.dumps(keywords, ensure_ascii=False)],
+        "keywords": [kw_str],
         "category": [cat_str] 
     })
     df = pd.concat([df, new_data], ignore_index=True)
     save_data_to_sheet(df)
+    return True
 
 def update_entry(entry_id, writer, text, keywords, categories, date_val):
     df = load_data()
     idx = df[df['id'] == entry_id].index
+    
     if isinstance(categories, list):
         cat_str = json.dumps(categories, ensure_ascii=False)
     else:
         cat_str = json.dumps([str(categories)], ensure_ascii=False)
 
+    if isinstance(keywords, list):
+        kw_str = json.dumps(keywords, ensure_ascii=False)
+    else:
+        kw_str = json.dumps([str(keywords)], ensure_ascii=False)
+
     if not idx.empty:
         df.at[idx[0], 'writer'] = writer
         df.at[idx[0], 'text'] = text
-        df.at[idx[0], 'keywords'] = json.dumps(keywords, ensure_ascii=False)
+        df.at[idx[0], 'keywords'] = kw_str
         df.at[idx[0], 'category'] = cat_str
         df.at[idx[0], 'date'] = pd.to_datetime(date_val).normalize()
         save_data_to_sheet(df)
+        return True
+    return False
+
+# [신규] AI 분석 결과를 업데이트하는 함수
+def update_ai_result(entry_id, keywords, categories):
+    df = load_data()
+    idx = df[df['id'] == entry_id].index
+    
+    if isinstance(categories, list):
+        cat_str = json.dumps(categories, ensure_ascii=False)
+    else:
+        cat_str = json.dumps([str(categories)], ensure_ascii=False)
+
+    if isinstance(keywords, list):
+        kw_str = json.dumps(keywords, ensure_ascii=False)
+    else:
+        kw_str = json.dumps([str(keywords)], ensure_ascii=False)
+    
+    if not idx.empty:
+        df.at[idx[0], 'keywords'] = kw_str
+        df.at[idx[0], 'category'] = cat_str
+        save_data_to_sheet(df)
+        return True
+    return False
+
 
 def delete_entry(entry_id):
     df = load_data()
@@ -117,60 +158,67 @@ def parse_categories(cat_data):
     except: return ["기타"]
 
 # -----------------------------------------------------------------------------
-# 2. AI 분석
+# 2. AI 분석 (비동기 처리를 위한 분리)
 # -----------------------------------------------------------------------------
-def analyze_text(text):
+def run_ai_analysis_and_update(entry_id, text):
+    """AI 분석을 실행하고 결과를 스프레드시트에 업데이트하는 함수"""
+    st.session_state[f'ai_status_{entry_id}'] = "running"
+    
     if GOOGLE_API_KEY == "YOUR_API_KEY":
-        return ["#API_KEY_없음"], ["기타"], "None"
+        kws, cats, used_model = ["#API_KEY_없음"], ["기타"], "None"
+    else:
+        genai.configure(api_key=GOOGLE_API_KEY)
+        kws, cats, used_model = ["#AI오류"], ["기타"], "None"
         
-    genai.configure(api_key=GOOGLE_API_KEY)
-    for model_name in MODEL_PRIORITY_LIST:
-        try:
-            model = genai.GenerativeModel(model_name)
-            prompt = f"""
-            너는 팀의 레슨런(Lesson Learned)을 분석하는 데이터 전문가야.
-            입력된 텍스트를 분석해서 JSON 형식으로 응답해.
+        for model_name in MODEL_PRIORITY_LIST:
+            try:
+                model = genai.GenerativeModel(model_name)
+                prompt = f"""
+                너는 팀의 레슨런(Lesson Learned)을 분석하는 데이터 전문가야.
+                입력된 텍스트를 분석해서 JSON 형식으로 응답해.
 
-            [규칙]
-            1. keywords: 본문의 핵심 주제를 해시태그 형태의 명사로 2~3개 추출. (예: ["#코드리뷰", "#API설계"])
-            2. categories: 본문의 성격을 나타내는 직무/분야 카테고리 1~2개 추출.
-            - 참고: {', '.join(DEFAULT_CATEGORIES)} (필요하면 새로운 단어 생성 가능)
-            
-            [응답 예시]
-            {{
-                "keywords": ["#디자인시스템", "#일관성"],
-                "categories": ["디자인", "협업"]
-            }}
-            
-            텍스트: {text}
-            """
-            response = model.generate_content(prompt)
-            text_resp = response.text.replace("```json", "").replace("```", "").strip()
-            result = json.loads(text_resp)
-            
-            kws = result.get("keywords", [])
-            cats = result.get("categories", ["기타"])
-            
-            kws = [k for k in kws if k and str(k).strip() and k != "#분석불가"]
-            if not kws: kws = ["#일반"]
-            if isinstance(cats, str): cats = cats
-            
-            # print(f"✅ Success with {model_name}")
-            return kws, cats, model_name
-
-        except Exception as e:
-            # print(f"⚠️ {model_name} failed: {e}")
-            time.sleep(1) 
-            continue
-    return ["#AI오류"], ["기타"], "None"
-
-
-def get_current_week_dates():
-    """현재 주(월요일 ~ 일요일)의 시작일과 종료일을 반환합니다."""
-    today = datetime.date.today()
-    start_of_week = today - datetime.timedelta(days=today.weekday())
-    end_of_week = start_of_week + datetime.timedelta(days=6)
-    return pd.Timestamp(start_of_week).normalize(), pd.Timestamp(end_of_week).normalize()
+                [규칙]
+                1. keywords: 본문의 핵심 주제를 해시태그 형태의 명사로 2~3개 추출. (예: ["#코드리뷰", "#API설계"])
+                2. categories: 본문의 성격을 나타내는 직무/분야 카테고리 1~2개 추출.
+                - 참고: {', '.join(DEFAULT_CATEGORIES)} (필요하면 새로운 단어 생성 가능)
+                
+                [응답 예시]
+                {{
+                    "keywords": ["#디자인시스템", "#일관성"],
+                    "categories": ["디자인", "협업"]
+                }}
+                
+                텍스트: {text}
+                """
+                response = model.generate_content(prompt)
+                text_resp = response.text.replace("```json", "").replace("```", "").strip()
+                result = json.loads(text_resp)
+                
+                kws = result.get("keywords", [])
+                cats = result.get("categories", ["기타"])
+                
+                kws = [k for k in kws if k and str(k).strip() and k != "#분석불가"]
+                if not kws: kws = ["#일반"]
+                if isinstance(cats, str): cats = [cats]
+                
+                used_model = model_name
+                break
+            except Exception as e:
+                time.sleep(1) 
+                continue
+    
+    # 최종 결과 업데이트
+    if update_ai_result(entry_id, kws, cats):
+        st.session_state[f'ai_status_{entry_id}'] = "completed"
+        # st.success(f"✅ AI 분석 완료! (Model: {used_model})")
+        
+        # UI 업데이트 트리거 (Streamlit에서는 Threading 후 st.rerun()을 직접 호출할 수 없음.
+        # 따라서, 세션 상태를 플래그로 사용하여 다음 렌더링 시 메시지 표시 및 데이터 재로드를 유도해야 함)
+        st.session_state['refresh_on_next_load'] = True
+        
+    else:
+        st.session_state[f'ai_status_{entry_id}'] = "failed"
+        # st.error("AI 분석 결과 업데이트 실패.")
 
 # -----------------------------------------------------------------------------
 # 3. Streamlit UI
@@ -181,6 +229,14 @@ if 'edit_mode' not in st.session_state:
     st.session_state['edit_mode'] = False
 if 'edit_data' not in st.session_state:
     st.session_state['edit_data'] = {}
+
+# [신규] AI 분석 완료 플래그 체크 및 재로딩 (Streamlit에서 비동기 업데이트를 위한 workaround)
+if 'refresh_on_next_load' in st.session_state and st.session_state['refresh_on_next_load']:
+    st.session_state['refresh_on_next_load'] = False
+    # AI 완료 메시지 표시 후 reruni
+    st.toast("✅ AI 분석 및 데이터 업데이트가 완료되었습니다.")
+    st.rerun()
+
 
 @st.dialog("⚠️ 삭제 확인")
 def confirm_delete_dialog(entry_id):
@@ -209,7 +265,7 @@ st.markdown(f"""
     /* [수정] 태그 아래 마진(여백) 및 키워드 폰트/색상 설정 */
     .tag-container {{
         margin-top: 10px;
-        margin-bottom: 20px; 
+        margin-bottom: 20px; /* 다음 기록과의 간격 확보 */
     }}
     
     /* 이름/버튼 아래 가로줄 마진 조정 */
@@ -257,7 +313,7 @@ st.markdown(f"""
         margin-left: 10px;
     }}
 
-    /* [신규] 카테고리 라벨 스타일 */
+    /* [신규] 카테고리 라벨 스타일 (보라색) */
     .cat-badge {{
         background-color: {PURPLE_PALETTE[800]}; /* 보라색 배경 */
         color: white;
@@ -268,7 +324,7 @@ st.markdown(f"""
         margin-right: 5px;
     }}
 
-    /* [신규] 키워드 텍스트 스타일 */
+    /* [신규] 키워드 텍스트 스타일 (옅은 파란색) */
     .keyword-text {{
         color: {PURPLE_PALETTE[400]}; /* 옅은 파란색/청자색 */
         font-size: 0.8rem; /* 폰트 크기 통일 */
@@ -300,11 +356,7 @@ with tab1:
     # --------------------------------------------------
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
-        if st.button("취소하고 새 글 쓰기"):
-            st.session_state['edit_mode'] = False
-            st.session_state['edit_data'] = {}
-            st.rerun()
-            
+        
         form_writer = st.session_state['edit_data'].get('writer', '')
         form_text = st.session_state['edit_data'].get('text', '')
         saved_date = st.session_state['edit_data'].get('date')
@@ -317,43 +369,60 @@ with tab1:
         form_writer = ""
         form_text = ""
         form_date = datetime.date.today()
+        
+    # [수정] 취소 버튼을 폼 바깥에 배치하여 오류 회피 및 좌우 정렬 구현
+    if st.session_state['edit_mode']:
+        col_outside_cancel, col_outside_dummy = st.columns([1, 1]) # 폼 제출 버튼과 나란히 보이기 위한 컬럼 생성
+        with col_outside_cancel:
+            if st.button("취소하고 새 글 쓰기", key="cancel_edit_outside", use_container_width=True, type="secondary"):
+                st.session_state['edit_mode'] = False
+                st.session_state['edit_data'] = {}
+                st.rerun()
 
     with st.form("record_form", clear_on_submit=True):
         c_input1, c_input2 = st.columns([1, 1])
         with c_input1:
-            writer = st.text_input("작성자", value=form_writer, placeholder="이름 입력")
+            writer = st.text_input("작성자", value=form_writer, placeholder="이름 입력", key="form_writer")
         with c_input2:
-            selected_date = st.date_input("날짜", value=form_date)
+            selected_date = st.date_input("날짜", value=form_date, key="form_date")
         
-        text = st.text_area("내용 (Markdown 지원)", value=form_text, height=150, placeholder="배운 점, 문제 해결 과정 등을 자유롭게 적어주세요. AI가 자동으로 태그를 달아줍니다.")
+        # [수정] 내용 입력란 높이 300px로 증가
+        text = st.text_area("내용 (Markdown 지원)", value=form_text, height=300, placeholder="배운 점, 문제 해결 과정 등을 자유롭게 적어주세요.", key="form_text")
         
-        submitted = st.form_submit_button("수정 완료" if st.session_state['edit_mode'] else "기록 저장하기", type="primary", use_container_width=True)
-        
+        # 폼 제출 버튼 (수정 모드와 일반 저장 모드 분리)
+        if st.session_state['edit_mode']:
+            # 취소 버튼은 폼 바깥에 배치했으므로, 여기서는 제출 버튼만 배치
+            submitted = st.form_submit_button("수정 완료", type="primary", use_container_width=True)
+            # st.form_submit_button은 컬럼 배치 없이 풀 너비를 사용하는 것이 가장 안정적입니다.
+        else:
+            submitted = st.form_submit_button("기록 저장하기", type="primary", use_container_width=True)
+
         if submitted:
             if not writer or not text:
                 st.error("작성자와 내용을 모두 입력해주세요.")
             else:
-                with st.spinner("✨ AI 분석 및 저장 중..."):
-                    ai_keywords, ai_cats, used_model = analyze_text(text)
-                    if used_model == "None" and GOOGLE_API_KEY != "YOUR_API_KEY":
-                         st.error("AI 모델 연결 실패. 잠시 후 다시 시도해주세요.")
-                    elif GOOGLE_API_KEY == "YOUR_API_KEY":
-                        st.warning("API 키가 없어 자동 분석은 건너뛰었습니다. (태그: #API_KEY_없음)")
-                        ai_keywords, ai_cats = ["#API_KEY_없음"], ["기타"]
-                        used_model = "Manual"
-                    
-                    if st.session_state['edit_mode']:
-                        update_entry(
-                            st.session_state['edit_data']['id'], 
-                            writer, text, ai_keywords, ai_cats, selected_date
-                        )
-                        st.success(f"✅ 수정 완료! (Model: {used_model})")
-                        st.session_state['edit_mode'] = False
-                        st.session_state['edit_data'] = {}
-                        st.rerun()
-                    else:
-                        save_entry(writer, text, ai_keywords, ai_cats, selected_date)
-                        st.success(f"✅ 저장 완료! (태그: {', '.join(ai_cats)} / Model: {used_model})")
+                # 1. 내용을 먼저 저장 (임시 태그 사용)
+                entry_id = st.session_state['edit_data']['id'] if st.session_state['edit_mode'] else str(uuid.uuid4())
+                
+                if st.session_state['edit_mode']:
+                     # 수정 모드: 임시 태그 없이 현재 폼 데이터로 즉시 업데이트
+                     update_entry(entry_id, writer, text, ["#분석중"], ["업데이트"], selected_date)
+                     st.success(f"✅ 수정 완료! AI가 새로운 태그를 분석 중입니다.")
+                else:
+                     # 신규 저장 모드: 임시 태그로 저장
+                     save_entry(entry_id, writer, text, ["#분석중"], ["미분류"], selected_date)
+                     st.success(f"✅ 저장 완료! AI가 태그를 분석 중입니다.")
+                
+                # 2. AI 분석을 별도 스레드로 실행 (비동기 처럼 보이도록 유도)
+                # Streamlit은 스레딩을 공식적으로 지원하지 않지만, 긴 작업을 UI 블로킹 없이 시작하는 용도로 사용
+                ai_thread = threading.Thread(target=run_ai_analysis_and_update, args=(entry_id, text))
+                ai_thread.start()
+                
+                # 3. UI 갱신 (사용자가 기다리는 시간을 줄이고 UI를 즉시 재로딩하여 저장된 데이터를 보여줌)
+                st.session_state['edit_mode'] = False
+                st.session_state['edit_data'] = {}
+                st.rerun()
+
 
     st.markdown("---")
     
@@ -406,7 +475,7 @@ with tab1:
             
             for idx, row in filtered_df.iterrows():
                 with st.container(border=True):
-                    # [수정] 수직 가운데 정렬 및 마크다운 오류 해결
+                    # [요청 반영] 이름 / 작성일 / 수정 / 삭제 구성 및 수직 중앙 정렬
                     col_info, col_btn_edit, col_btn_del = st.columns([6, 1, 1])
                     
                     date_str = row['date'].strftime('%Y-%m-%d')
@@ -586,7 +655,7 @@ with tab2:
                     c1 = st.columns([1])[0]
                     with c1:
                         date_str = row['date'].strftime('%Y-%m-%d') if isinstance(row['date'], pd.Timestamp) else str(row['date'])[:10]
-                        # [수정] 마크다운 깨짐 방지
+                        # 순수 HTML/CSS로 스타일링 적용 (마크다운 오류 해결)
                         info_html = f"""
                         <div class='info-block'>
                             <span class='writer-name'>{row['writer']}</span>
@@ -607,7 +676,7 @@ with tab2:
                     keyword_text = " ".join([f"#{k}" for k in kws])
                     
                     # 카테고리 (작은 뱃지 형태 유지, 보라색 배경)
-                    cat_badges = "".join([f'<span class="cat-badge" style="background-color:{PURPLE_PALETTE[800]};">{c}</span>' for c in cats])
+                    cat_badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
                     
                     
                     # 태그 아래 마진을 위해 .tag-container 사용
