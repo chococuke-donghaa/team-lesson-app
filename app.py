@@ -4,6 +4,7 @@ import json
 import datetime
 import google.generativeai as genai
 import plotly.express as px
+import plotly.graph_objects as go
 import uuid
 import time
 from streamlit_gsheets import GSheetsConnection
@@ -14,6 +15,7 @@ from streamlit_gsheets import GSheetsConnection
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
 CARD_BG_COLOR = "#0E1117"
 
+# 모델 우선순위
 MODEL_PRIORITY_LIST = [
     "gemini-2.5-flash",       
     "gemini-2.5-flash-lite",  
@@ -356,7 +358,7 @@ with tab2:
                     cat_counts.columns = ['Category', 'Value']
                     
                     if not cat_counts.empty:
-                        # [핵심 수정] px.treemap 사용 (데이터 바인딩이 훨씬 강력함)
+                        # [핵심] custom_data를 사용하여 카테고리 이름을 명시적으로 전달
                         fig_tree = px.treemap(
                             cat_counts, 
                             path=['Category'], 
@@ -366,7 +368,8 @@ with tab2:
                                 (0.0, PURPLE_PALETTE[400]), 
                                 (0.5, PURPLE_PALETTE[600]), 
                                 (1.0, PURPLE_PALETTE[900])
-                            ]
+                            ],
+                            custom_data=['Category'] # 클릭 시 이 데이터를 참조함
                         )
                         fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=450, paper_bgcolor=CARD_BG_COLOR)
                         fig_tree.update_traces(
@@ -375,7 +378,6 @@ with tab2:
                             hovertemplate='<b>%{label}</b><br>%{value}건<extra></extra>'
                         )
                         
-                        # [핵심] on_select="rerun"을 사용하면 selection 객체가 반환됨
                         event = st.plotly_chart(fig_tree, use_container_width=True, on_select="rerun", key="treemap_chart")
                     else:
                         st.info("데이터가 없습니다.")
@@ -389,13 +391,18 @@ with tab2:
         
         selected_category = None
         
-        # [핵심 수정] selection.rows를 사용하여 클릭된 데이터의 인덱스를 찾음
-        # px.treemap을 사용했으므로 event.selection.rows에 원본 데이터프레임(cat_counts)의 인덱스가 들어옴
-        if event and event.selection and event.selection.rows:
-            # 첫 번째 선택된 행의 인덱스 가져오기
-            row_idx = event.selection.rows[0]
-            # cat_counts 데이터프레임에서 해당 카테고리 이름 가져오기
-            selected_category = cat_counts.iloc[row_idx]['Category']
+        # [핵심 수정] points에서 customdata를 우선적으로 찾도록 로직 변경 (가장 안전한 방법)
+        if event and event.selection and "points" in event.selection:
+            for point in event.selection.points:
+                # customdata가 있으면 그것을 사용
+                if "customdata" in point:
+                    # px.treemap은 customdata를 리스트로 감싸서 반환함
+                    selected_category = point["customdata"][0]
+                    break
+                # 만약 customdata가 없다면 label을 사용 (보조 수단)
+                elif "label" in point:
+                    selected_category = point["label"]
+                    break
         
         if selected_category:
             st.subheader(f"📂 '{selected_category}' 카테고리 모아보기")
