@@ -13,7 +13,7 @@ from streamlit_gsheets import GSheetsConnection
 # 1. 설정 및 기본 함수
 # -----------------------------------------------------------------------------
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
-CARD_BG_COLOR = "#0E1117"
+CARD_BG_COLOR = "#0E1117" # 메인 카드 배경색 (어두운색)
 
 # 모델 우선순위 (쿼터 관리)
 MODEL_PRIORITY_LIST = [
@@ -202,7 +202,7 @@ st.markdown(f"""
     div[data-testid="stMetricLabel"] {{ color: #9CA3AF !important; }}
     div[data-testid="stMetricValue"] {{ color: white !important; font-weight: 700 !important; }}
     
-    /* Plotly 배경 투명하게 또는 어둡게 설정 */
+    /* Plotly 배경색을 CARD_BG_COLOR로 강제하여 통일 */
     .js-plotly-plot .plotly {{ background-color: {CARD_BG_COLOR} !important; }}
     .modebar {{ background-color: {CARD_BG_COLOR} !important; border: 1px solid #30333F; border-top-left-radius: 5px; }}
     </style>
@@ -404,8 +404,7 @@ with tab2:
             st.metric("가장 핫한 주제", top_cat)
             st.metric("누적 키워드", f"{len(set(all_kws))}개")
             st.metric("최다 작성자", top_writer)
-            # KPI가 Tree Map의 높이를 대략 맞출 수 있도록 빈 공간 채움
-            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) # 높이 맞추기
 
         with col_tree_content:
             st.subheader("🗺️ Lesson Map (카테고리 비중)")
@@ -422,7 +421,6 @@ with tab2:
                     color='Value',
                     color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])]
                 )
-                # [수정] Treemap 높이를 KPI와 대략 맞추기 위해 320px 지정
                 fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=320, paper_bgcolor=CARD_BGCOLOR, plot_bgcolor=CARD_BGCOLOR)
                 fig_tree.update_traces(textfont=dict(family="Pretendard", color="white", size=18))
                 st.plotly_chart(fig_tree, use_container_width=True)
@@ -500,9 +498,11 @@ with tab2:
             
             for idx, row in filtered_df_dash.iterrows():
                 with st.container(border=True):
-                    # [수정] 조회 전용으로 간단히 표시
-                    date_str = row['date'].strftime('%Y-%m-%d') if isinstance(row['date'], pd.Timestamp) else str(row['date'])[:10]
-                    st.markdown(f"**{row['writer']}** <span style='color:#777; font-size:0.9em; margin-left:10px;'>{date_str}</span>", unsafe_allow_html=True)
+                    # 헤더: 날짜 | 작성자 (버튼 없음)
+                    c1 = st.columns([1])[0]
+                    with c1:
+                        date_str = row['date'].strftime('%Y-%m-%d') if isinstance(row['date'], pd.Timestamp) else str(row['date'])[:10]
+                        st.markdown(f"**{row['writer']}** <span style='color:#777; font-size:0.9em; margin-left:10px;'>{date_str}</span>", unsafe_allow_html=True)
                     
                     st.markdown("---")
                     st.markdown(row['text'])
