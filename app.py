@@ -32,9 +32,6 @@ PURPLE_PALETTE = {
     800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
 }
 
-# Plotly 차트 배경색 헥스 코드 (안정적인 작동을 위해 직접 사용)
-PLOTLY_BG_HEX = "#0E1117"
-
 def get_connection():
     return st.connection("gsheets", type=GSheetsConnection)
 
@@ -207,7 +204,7 @@ st.markdown(f"""
     
     /* Plotly는 template="plotly_dark"를 사용 */
     
-    /* [수정] 태그 아래 마진(여백) 추가 */
+    /* [수정] 태그 아래 마진(여백) 추가 및 다음 기록 간격 조정 */
     .tag-container {{
         margin-top: 10px;
         margin-bottom: 20px; /* 다음 기록과의 간격 확보 (늘림) */
@@ -219,6 +216,12 @@ st.markdown(f"""
         margin-bottom: 5px; /* 내용과의 간격 줄임 */
         border-top: 1px solid #30333F;
     }}
+    
+    /* [핵심 수정] st.container 하단 마진을 줄여서 전체 카드 간격을 줄임 */
+    div[data-testid="stVerticalBlock"] > div:nth-child(2) > div {{ 
+        margin-bottom: 10px !important; /* 기본 20px 마진을 10px로 줄임 */
+    }}
+    
     </style>
 """, unsafe_allow_html=True)
 
