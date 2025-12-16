@@ -210,13 +210,13 @@ st.markdown(f"""
     /* [수정] 태그 아래 마진(여백) 추가 */
     .tag-container {{
         margin-top: 10px;
-        margin-bottom: 15px; /* 다음 기록과의 간격 확보 */
+        margin-bottom: 20px; /* 다음 기록과의 간격 확보 (늘림) */
     }}
     
     /* [수정] 이름/버튼 아래 가로줄 마진 조정 */
     hr {{ 
         margin-top: 5px;   /* 상단 마진 줄임 */
-        margin-bottom: 10px; /* 하단 마진 유지 */
+        margin-bottom: 5px; /* 내용과의 간격 줄임 */
         border-top: 1px solid #30333F;
     }}
     </style>
