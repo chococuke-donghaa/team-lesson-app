@@ -206,6 +206,19 @@ st.markdown(f"""
     div[data-testid="stMetricValue"] {{ color: white !important; font-weight: 700 !important; }}
     
     /* Plotly는 template="plotly_dark"를 사용 */
+    
+    /* [수정] 태그 아래 마진(여백) 추가 */
+    .tag-container {{
+        margin-top: 10px;
+        margin-bottom: 15px; /* 다음 기록과의 간격 확보 */
+    }}
+    
+    /* [수정] 이름/버튼 아래 가로줄 마진 조정 */
+    hr {{ 
+        margin-top: 5px;   /* 상단 마진 줄임 */
+        margin-bottom: 10px; /* 하단 마진 유지 */
+        border-top: 1px solid #30333F;
+    }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -356,7 +369,7 @@ with tab1:
                             confirm_delete_dialog(row['id'])
 
                     # 내용 및 태그
-                    st.markdown("---")
+                    st.markdown("<hr>", unsafe_allow_html=True) # 마진 조정된 hr 사용
                     st.markdown(row['text'])
                     
                     cats = parse_categories(row['category'])
@@ -366,7 +379,8 @@ with tab1:
                     badges = "".join([f'<span style="background-color:{PURPLE_PALETTE[800]}; color:white; padding:3px 6px; border-radius:10px; font-size:0.8rem; margin-right:5px;">{c}</span>' for c in cats])
                     badges += " " + "".join([f'<span style="background-color:#30333F; color:#CCC; padding:3px 6px; border-radius:10px; font-size:0.8rem; margin-right:5px;">{k}</span>' for k in kws])
                     
-                    st.markdown(f"<div style='margin-top:10px;'>{badges}</div>", unsafe_allow_html=True)
+                    # [수정] 태그 아래 마진을 위해 .tag-container 사용
+                    st.markdown(f"<div class='tag-container'>{badges}</div>", unsafe_allow_html=True)
         else:
             if is_filtered_by_user:
                 st.info("선택한 조건에 맞는 기록이 없습니다.")
@@ -422,7 +436,7 @@ with tab2:
                 color='Value',
                 color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])]
             )
-            # [수정] 배경색을 PLOTLY_BG_HEX로 지정하고, Dark Theme 템플릿 사용
+            # [수정] 배경색 설정 및 template="plotly_dark" 사용
             fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=350, template="plotly_dark", 
                                    paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
             fig_tree.update_traces(textfont=dict(family="Pretendard", color="white", size=18))
@@ -521,7 +535,8 @@ with tab2:
                     for k in kws:
                         badges += f'<span style="background-color:#30333F; color:#CCC; padding:4px 8px; border-radius:12px; font-size:0.75rem; margin-right:5px;">{k}</span>'
                     
-                    st.markdown(f"<div style='margin-top:10px;'>{badges}</div>", unsafe_allow_html=True)
+                    # [수정] 태그 아래 마진을 위해 .tag-container 사용
+                    st.markdown(f"<div class='tag-container'>{badges}</div>", unsafe_allow_html=True)
         else:
             st.info("해당 카테고리의 글이 없습니다.")
 
