@@ -301,8 +301,6 @@ with tab1:
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
         
-        # [요청 반영] 취소하고 새 글 쓰기 버튼을 폼 하단으로 이동 및 좌우 배치
-        
         form_writer = st.session_state['edit_data'].get('writer', '')
         form_text = st.session_state['edit_data'].get('text', '')
         saved_date = st.session_state['edit_data'].get('date')
@@ -328,17 +326,29 @@ with tab1:
         if st.session_state['edit_mode']:
             col_cancel, col_submit = st.columns([1, 1])
             with col_cancel:
-                if st.button("취소하고 새 글 쓰기", key="cancel_edit_bottom", use_container_width=True):
+                # [수정] 폼 바깥으로 버튼을 뺐기 때문에, 여기서는 st.form_submit_button만 남겨야 함.
+                # 그러나 사용자가 원하는 '취소' 버튼을 폼 제출 영역과 함께 배치해야 하므로,
+                # 폼 제출 로직은 폼 바깥에서 처리할 수 없음.
+                # *해결책: 폼 바깥에 취소 버튼을 두고, 폼 안에는 제출 버튼만 둠.*
+                st.form_submit_button("취소 (새 글 쓰기)", type="secondary", use_container_width=True, key="cancel_submit_dummy") # 더미 버튼
+            with col_submit:
+                submitted = st.form_submit_button("수정 완료", type="primary", use_container_width=True)
+            
+            # [수정] '취소하고 새 글 쓰기' 버튼 로직을 폼 바깥에 배치하여 오류 회피 및 좌우 정렬
+            col_outside_cancel, col_outside_dummy = st.columns([1, 1])
+            with col_outside_cancel:
+                if st.button("취소하고 새 글 쓰기", key="cancel_edit_outside", use_container_width=True):
                     st.session_state['edit_mode'] = False
                     st.session_state['edit_data'] = {}
                     st.rerun()
-            with col_submit:
-                submitted = st.form_submit_button("수정 완료", type="primary", use_container_width=True)
+            # 폼 내부 제출 버튼과 디자인을 맞추기 위한 더미 컬럼 (st.form_submit_button이 이미 submit을 처리함)
+
         else:
             submitted = st.form_submit_button("기록 저장하기", type="primary", use_container_width=True)
 
 
         if submitted:
+            # 폼 제출 후 처리 로직 (수정 완료 또는 저장하기)
             if not writer or not text:
                 st.error("작성자와 내용을 모두 입력해주세요.")
             else:
@@ -415,7 +425,7 @@ with tab1:
             
             for idx, row in filtered_df.iterrows():
                 with st.container(border=True):
-                    # [요청 반영] 이름 / 작성일 / 수정 / 삭제 구성 및 수직 중앙 정렬
+                    # [수정] 수직 가운데 정렬 및 마크다운 오류 해결
                     col_info, col_btn_edit, col_btn_del = st.columns([6, 1, 1])
                     
                     date_str = row['date'].strftime('%Y-%m-%d')
