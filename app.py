@@ -204,10 +204,11 @@ st.markdown(f"""
     
     /* Plotly는 template="plotly_dark"를 사용 */
     
-    /* 태그 아래 마진 */
+    /* [수정] 태그 아래 마진(여백) 추가 */
     .tag-container {{
         margin-top: 10px;
-        margin-bottom: 20px; 
+        margin-bottom: 20px; /* 다음 기록과의 간격 확보 */
+        color: {PURPLE_PALETTE[400]}; /* 키워드 텍스트 색상 */
     }}
     
     /* 이름/버튼 아래 가로줄 마진 조정 */
@@ -421,11 +422,15 @@ with tab1:
                     try: kws = json.loads(row['keywords'])
                     except: kws = []
                     
-                    badges = "".join([f'<span style="background-color:{PURPLE_PALETTE[800]}; color:white; padding:3px 6px; border-radius:10px; font-size:0.8rem; margin-right:5px;">{c}</span>' for c in cats])
-                    badges += " " + "".join([f'<span style="background-color:#30333F; color:#CCC; padding:3px 6px; border-radius:10px; font-size:0.8rem; margin-right:5px;">{k}</span>' for k in kws])
+                    # [수정] 키워드를 #이 붙은 텍스트로 변경
+                    keyword_text = " ".join([f"#{k}" for k in kws])
+                    
+                    # 카테고리 (작은 뱃지 형태 유지, 색상만 어둡게)
+                    cat_badges = "".join([f'<span style="background-color:#444; color:#CCC; padding:3px 6px; border-radius:10px; font-size:0.8rem; margin-right:5px;">{c}</span>' for c in cats])
+                    
                     
                     # 태그 아래 마진을 위해 .tag-container 사용
-                    st.markdown(f"<div class='tag-container'>{badges}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='tag-container'>{cat_badges} <span style='font-weight: 500;'>{keyword_text}</span></div>", unsafe_allow_html=True)
         else:
             if is_filtered_by_user:
                 st.info("선택한 조건에 맞는 기록이 없습니다.")
@@ -563,7 +568,14 @@ with tab2:
                     c1 = st.columns([1])[0]
                     with c1:
                         date_str = row['date'].strftime('%Y-%m-%d') if isinstance(row['date'], pd.Timestamp) else str(row['date'])[:10]
-                        st.markdown(f"**{row['writer']}** <span style='color:#777; font-size:0.9em; margin-left:10px;'>{date_str}</span>", unsafe_allow_html=True)
+                        # [수정] 마크다운 깨짐 방지
+                        info_html = f"""
+                        <div class='info-block'>
+                            <span class='writer-name'>{row['writer']}</span>
+                            <span class='date-info'>{date_str}</span>
+                        </div>
+                        """
+                        st.markdown(info_html, unsafe_allow_html=True)
                     
                     st.markdown("---")
                     st.markdown(row['text'])
@@ -573,15 +585,15 @@ with tab2:
                     try: kws = json.loads(row['keywords'])
                     except: kws = []
                     
-                    badges = ""
-                    for c in cats:
-                        bg = PURPLE_PALETTE[800] if c == selected_cat_filter else "#444"
-                        badges += f'<span style="background-color:{bg}; color:white; padding:4px 8px; border-radius:12px; font-size:0.75rem; margin-right:5px;">{c}</span>'
-                    for k in kws:
-                        badges += f'<span style="background-color:#30333F; color:#CCC; padding:4px 8px; border-radius:12px; font-size:0.75rem; margin-right:5px;">{k}</span>'
+                    # [수정] 키워드를 #이 붙은 텍스트로 변경
+                    keyword_text = " ".join([f"#{k}" for k in kws])
+                    
+                    # 카테고리 (작은 뱃지 형태 유지, 색상만 어둡게)
+                    cat_badges = "".join([f'<span style="background-color:#444; color:#CCC; padding:3px 6px; border-radius:10px; font-size:0.8rem; margin-right:5px;">{c}</span>' for c in cats])
+                    
                     
                     # 태그 아래 마진을 위해 .tag-container 사용
-                    st.markdown(f"<div class='tag-container'>{badges}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='tag-container'>{cat_badges} <span style='font-weight: 500;'>{keyword_text}</span></div>", unsafe_allow_html=True)
         else:
             st.info("해당 카테고리의 글이 없습니다.")
 
