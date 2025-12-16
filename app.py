@@ -391,56 +391,78 @@ with tab2:
             for k in df['keywords']: all_kws.extend(json.loads(k))
         except: all_kws = []
         
-        # 1. 핵심 지표
-        row1_col1, row1_col2 = st.columns([1, 3])
-        with row1_col1:
+        # 1. 핵심 지표 & 트리맵
+        col_kpi, col_tree = st.columns([1, 3])
+        
+        with col_kpi:
             st.subheader("Key Metrics")
             st.metric("총 기록 수", f"{total}건")
             st.metric("가장 핫한 주제", top_cat)
             st.metric("누적 키워드", f"{len(set(all_kws))}개")
             st.metric("최다 작성자", top_writer)
 
-        # 2. 시각화 (순수 뷰어)
-        with row1_col2:
-            st.subheader("📊 Insight Visuals")
-            v_col1, v_col2 = st.columns(2)
-            
-            with v_col1:
-                st.caption("Category Map (비중)")
-                if all_cats_flat:
-                    cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
-                    cat_counts.columns = ['Category', 'Value']
-                    
-                    fig_tree = px.treemap(
-                        cat_counts, 
-                        path=['Category'], 
-                        values='Value',
-                        color='Value',
-                        color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])]
-                    )
-                    fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=300, paper_bgcolor=CARD_BG_COLOR)
-                    fig_tree.update_traces(textfont=dict(family="Pretendard", color="white", size=18))
-                    st.plotly_chart(fig_tree, use_container_width=True)
-                else:
-                    st.info("데이터 부족")
+        with col_tree:
+            st.subheader("🗺️ Lesson Map (카테고리 비중)")
+            st.caption("가장 많은 기록이 있는 카테고리를 시각적으로 보여줍니다.")
+            if all_cats_flat:
+                cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
+                cat_counts.columns = ['Category', 'Value']
+                
+                fig_tree = px.treemap(
+                    cat_counts, 
+                    path=['Category'], 
+                    values='Value',
+                    color='Value',
+                    color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])]
+                )
+                fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=300, paper_bgcolor=CARD_BG_COLOR)
+                fig_tree.update_traces(textfont=dict(family="Pretendard", color="white", size=18))
+                st.plotly_chart(fig_tree, use_container_width=True)
+            else:
+                st.info("데이터 부족")
 
-            with v_col2:
-                # 파이 차트
-                st.caption("Category Ratio")
-                if all_cats_flat:
-                    cat_counts_pie = pd.Series(all_cats_flat).value_counts().reset_index()
-                    cat_counts_pie.columns = ['category', 'count']
-                    fig_pie = px.pie(cat_counts_pie, values='count', names='category', hole=0.5, 
-                                     color_discrete_sequence=[PURPLE_PALETTE[x] for x in [500, 600, 700, 800, 900]])
-                    fig_pie.update_layout(height=300, margin=dict(t=0, b=0, l=0, r=0), paper_bgcolor=CARD_BG_COLOR)
-                    st.plotly_chart(fig_pie, use_container_width=True)
-                else:
-                    st.info("데이터 부족")
+        st.divider()
+        
+        # 3. 파이 차트 & 바 차트
+        st.subheader("📊 상세 분석")
+        col_pie, col_bar = st.columns(2)
+
+        with col_pie:
+            st.caption("Category Ratio")
+            if all_cats_flat:
+                cat_counts_pie = pd.Series(all_cats_flat).value_counts().reset_index()
+                cat_counts_pie.columns = ['category', 'count']
+                fig_pie = px.pie(cat_counts_pie, values='count', names='category', hole=0.5, 
+                                 color_discrete_sequence=[PURPLE_PALETTE[x] for x in [500, 600, 700, 800, 900]])
+                fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20), paper_bgcolor=CARD_BG_COLOR)
+                st.plotly_chart(fig_pie, use_container_width=True)
+            else:
+                st.info("데이터 부족")
+        
+        with col_bar:
+            st.caption("Top 10 Keywords")
+            if all_kws:
+                kw_counts = pd.Series(all_kws).value_counts().head(10).reset_index()
+                kw_counts.columns = ['keyword', 'count']
+                fig_bar = go.Figure(go.Bar(
+                    x=kw_counts['count'], y=kw_counts['keyword'], orientation='h',
+                    text=kw_counts['count'], textposition='outside',
+                    marker=dict(color=PURPLE_PALETTE[600])
+                ))
+                fig_bar.update_layout(
+                    xaxis=dict(showgrid=False, visible=False), 
+                    yaxis=dict(showgrid=False, autorange="reversed"),
+                    height=350, margin=dict(t=20, b=20, l=10, r=40),
+                    paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR
+                )
+                st.plotly_chart(fig_bar, use_container_width=True)
+            else:
+                st.info("데이터 부족")
 
         st.divider()
 
         # ----------------------------------------------------------
-        # 3. 전체 목록 필터링 (Category Filter)
+        # 4. 전체 목록 필터링 (Category Filter) - 조회 전용
         # ----------------------------------------------------------
         st.subheader("🗂️ 전체 레슨런 목록 (카테고리 필터)")
         
@@ -461,28 +483,18 @@ with tab2:
         else:
             filtered_df_dash = df[df['category'].apply(lambda x: selected_cat_filter in parse_categories(x))]
         
-        # 목록 출력 (대시보드는 이전처럼 border와 expander 스타일 유지)
+        # 목록 출력 (수정/삭제 버튼 제거)
         if not filtered_df_dash.empty:
             filtered_df_dash = filtered_df_dash.sort_values(by="date", ascending=False)
             st.caption(f"총 {len(filtered_df_dash)}건의 기록이 있습니다.")
             
             for idx, row in filtered_df_dash.iterrows():
                 with st.container(border=True):
-                    # 헤더: 날짜 | 작성자 | 수정/삭제 버튼
-                    c1, c2 = st.columns([8, 2])
+                    # 헤더: 날짜 | 작성자 (버튼 없음)
+                    c1 = st.columns([1])[0]
                     with c1:
                         date_str = row['date'].strftime('%Y-%m-%d') if isinstance(row['date'], pd.Timestamp) else str(row['date'])[:10]
                         st.markdown(f"**{row['writer']}** <span style='color:#777; font-size:0.9em; margin-left:10px;'>{date_str}</span>", unsafe_allow_html=True)
-                    with c2:
-                        bc1, bc2 = st.columns(2)
-                        with bc1:
-                            if st.button("수정", key=f"edit_dash_{row['id']}"):
-                                st.session_state['edit_mode'] = True
-                                st.session_state['edit_data'] = row.to_dict()
-                                st.rerun() 
-                        with bc2:
-                            if st.button("삭제", key=f"del_dash_{row['id']}"):
-                                confirm_delete_dialog(row['id'])
                     
                     st.markdown("---")
                     st.markdown(row['text'])
