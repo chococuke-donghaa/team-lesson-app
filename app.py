@@ -374,12 +374,10 @@ with tab2:
                         colors = [get_relative_color(v, max_frequency) for v in values]
                         text_colors = ["#FFFFFF"] * len(labels)
                         
-                        # [핵심 수정] customdata에 라벨 데이터를 직접 넣어서 클릭 시 확실히 전달되게 함
                         fig_tree = go.Figure(go.Treemap(
                             labels=labels, 
                             parents=parents, 
                             values=values,
-                            customdata=labels, # << 여기입니다!
                             marker=dict(colors=colors, line=dict(width=2, color=CARD_BG_COLOR)),
                             textinfo="label+value",
                             textfont=dict(family="Pretendard", color=text_colors, size=22),
@@ -388,7 +386,8 @@ with tab2:
                         ))
                         fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=450, paper_bgcolor=CARD_BG_COLOR)
                         
-                        event = st.plotly_chart(fig_tree, use_container_width=True, on_select="rerun", selection_mode="points")
+                        # [핵심 수정] key를 부여하여 상태 유지 + on_select 사용
+                        event = st.plotly_chart(fig_tree, use_container_width=True, on_select="rerun", key="treemap_chart")
                     else:
                         st.info("데이터가 없습니다.")
                         event = None
@@ -400,16 +399,23 @@ with tab2:
         st.markdown("---")
         
         selected_category = None
-        # [핵심 수정] 포인트 데이터에서 customdata를 우선적으로 확인하여 가져옴
+        
+        # [핵심 수정] 포인트 데이터에서 Index를 사용하여 정확한 라벨 찾기
         if event and event.selection and event.selection.points:
+            # points 리스트 안에 클릭된 항목의 정보가 있음
             point = event.selection.points[0]
-            # customdata가 있으면 그걸 쓰고, 없으면 label을 씀
-            if "customdata" in point:
-                # plotly 버전에 따라 리스트로 올 수도 있음
-                cd = point["customdata"]
-                selected_category = cd[0] if isinstance(cd, list) else cd
-            else:
-                selected_category = point.get("label")
+            
+            # point_number는 해당 trace 데이터의 인덱스임
+            if "point_number" in point:
+                idx = point["point_number"]
+                # 위에서 차트를 그릴 때 사용한 labels 리스트에서 해당 인덱스의 값을 가져옴
+                # labels 변수는 if 블록 안에 있으므로 다시 생성하거나 데이터프레임에서 가져와야 함.
+                # 여기서는 로직의 안전성을 위해 cat_counts 데이터프레임을 다시 참조
+                if all_cats_flat:
+                    cat_counts_check = pd.Series(all_cats_flat).value_counts().reset_index()
+                    cat_counts_check.columns = ['Category', 'Value']
+                    if idx < len(cat_counts_check):
+                        selected_category = cat_counts_check.iloc[idx]['Category']
         
         if selected_category:
             st.subheader(f"📂 '{selected_category}' 카테고리 모아보기")
@@ -435,6 +441,7 @@ with tab2:
                         
                         badges = ""
                         for c in cats:
+                            # 선택된 카테고리는 보라색 강조
                             bg = PURPLE_PALETTE[800] if c == selected_category else "#444"
                             badges += f'<span style="background-color:{bg}; color:white; padding:4px 8px; border-radius:12px; font-size:0.75rem; margin-right:5px;">{c}</span>'
                         for k in kws:
