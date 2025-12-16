@@ -204,24 +204,46 @@ st.markdown(f"""
     
     /* Plotly는 template="plotly_dark"를 사용 */
     
-    /* [수정] 태그 아래 마진(여백) 추가 및 다음 기록 간격 조정 */
+    /* 태그 아래 마진 */
     .tag-container {{
         margin-top: 10px;
-        margin-bottom: 20px; /* 다음 기록과의 간격 확보 (늘림) */
+        margin-bottom: 20px; 
     }}
     
-    /* [수정] 이름/버튼 아래 가로줄 마진 조정 */
+    /* 이름/버튼 아래 가로줄 마진 */
     hr {{ 
-        margin-top: 5px;   /* 상단 마진 줄임 */
-        margin-bottom: 5px; /* 내용과의 간격 줄임 */
+        margin-top: 5px;   
+        margin-bottom: 5px; 
         border-top: 1px solid #30333F;
     }}
     
-    /* [핵심 수정] st.container 하단 마진을 줄여서 전체 카드 간격을 줄임 */
+    /* st.container 하단 마진을 줄여서 전체 카드 간격을 줄임 */
     div[data-testid="stVerticalBlock"] > div:nth-child(2) > div {{ 
-        margin-bottom: 10px !important; /* 기본 20px 마진을 10px로 줄임 */
+        margin-bottom: 10px !important; 
+    }}
+
+    /* [신규/수정] 버튼 크기 줄이기 */
+    /* 버튼 텍스트와 패딩 조정 */
+    div[data-testid="stButton"] > button {{
+        padding-top: 4px;
+        padding-bottom: 4px;
+        font-size: 0.8rem; /* 텍스트 크기 축소 */
     }}
     
+    /* [신규/수정] 수직 가운데 정렬을 위한 flexbox 적용 */
+    /* col_info와 col_btn들이 있는 stHorizontalBlock 컨테이너에 적용 */
+    div[data-testid="stHorizontalBlock"] {{
+        align-items: center; /* 수직 가운데 정렬 */
+    }}
+    
+    /* 이름/날짜 정보가 있는 텍스트를 감싸는 div에 적용하여 버튼과 높이를 맞춤 */
+    .info-block {{
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        height: 100%; 
+    }}
+
     </style>
 """, unsafe_allow_html=True)
 
@@ -354,20 +376,23 @@ with tab1:
             
             for idx, row in filtered_df.iterrows():
                 with st.container(border=True):
-                    # [요청 반영] 이름 / 작성일 / 수정 / 삭제 구성
+                    # [수정] 수직 가운데 정렬을 위해 st.columns를 사용하고 CSS 클래스(.info-block)로 정렬
                     col_info, col_btn_edit, col_btn_del = st.columns([6, 1, 1])
                     
                     date_str = row['date'].strftime('%Y-%m-%d')
                     
                     with col_info:
-                        st.markdown(f"**{row['writer']}** <span style='color:#777; font-size:0.9em; margin-left:10px;'>({date_str} 작성)</span>", unsafe_allow_html=True)
+                        # [수정] info-block 클래스 적용
+                        st.markdown(f"<div class='info-block'>**{row['writer']}** <span style='color:#777; font-size:0.9em; margin-left:10px;'>({date_str} 작성)</span></div>", unsafe_allow_html=True)
                     
                     with col_btn_edit:
+                        # [수정] 버튼 크기 축소 (CSS로 적용)
                         if st.button("수정", key=f"edit_tab1_{row['id']}", use_container_width=True):
                             st.session_state['edit_mode'] = True
                             st.session_state['edit_data'] = row.to_dict()
                             st.rerun()
                     with col_btn_del:
+                        # [수정] 버튼 크기 축소 (CSS로 적용)
                         if st.button("삭제", key=f"del_tab1_{row['id']}", use_container_width=True):
                             confirm_delete_dialog(row['id'])
 
@@ -382,7 +407,7 @@ with tab1:
                     badges = "".join([f'<span style="background-color:{PURPLE_PALETTE[800]}; color:white; padding:3px 6px; border-radius:10px; font-size:0.8rem; margin-right:5px;">{c}</span>' for c in cats])
                     badges += " " + "".join([f'<span style="background-color:#30333F; color:#CCC; padding:3px 6px; border-radius:10px; font-size:0.8rem; margin-right:5px;">{k}</span>' for k in kws])
                     
-                    # [수정] 태그 아래 마진을 위해 .tag-container 사용
+                    # 태그 아래 마진을 위해 .tag-container 사용
                     st.markdown(f"<div class='tag-container'>{badges}</div>", unsafe_allow_html=True)
         else:
             if is_filtered_by_user:
@@ -538,7 +563,7 @@ with tab2:
                     for k in kws:
                         badges += f'<span style="background-color:#30333F; color:#CCC; padding:4px 8px; border-radius:12px; font-size:0.75rem; margin-right:5px;">{k}</span>'
                     
-                    # [수정] 태그 아래 마진을 위해 .tag-container 사용
+                    # 태그 아래 마진을 위해 .tag-container 사용
                     st.markdown(f"<div class='tag-container'>{badges}</div>", unsafe_allow_html=True)
         else:
             st.info("해당 카테고리의 글이 없습니다.")
