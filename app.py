@@ -210,7 +210,7 @@ st.markdown(f"""
         margin-bottom: 20px; 
     }}
     
-    /* 이름/버튼 아래 가로줄 마진 */
+    /* 이름/버튼 아래 가로줄 마진 조정 */
     hr {{ 
         margin-top: 5px;   
         margin-bottom: 5px; 
@@ -222,26 +222,37 @@ st.markdown(f"""
         margin-bottom: 10px !important; 
     }}
 
-    /* [신규/수정] 버튼 크기 줄이기 */
+    /* [수정] 버튼 크기 줄이기 */
     /* 버튼 텍스트와 패딩 조정 */
     div[data-testid="stButton"] > button {{
         padding-top: 4px;
         padding-bottom: 4px;
-        font-size: 0.8rem; /* 텍스트 크기 축소 */
+        font-size: 0.75rem; /* 텍스트 크기 축소 */
     }}
     
-    /* [신규/수정] 수직 가운데 정렬을 위한 flexbox 적용 */
+    /* [수정] 수직 가운데 정렬을 위한 flexbox 적용 */
     /* col_info와 col_btn들이 있는 stHorizontalBlock 컨테이너에 적용 */
     div[data-testid="stHorizontalBlock"] {{
         align-items: center; /* 수직 가운데 정렬 */
     }}
     
-    /* 이름/날짜 정보가 있는 텍스트를 감싸는 div에 적용하여 버튼과 높이를 맞춤 */
+    /* 이름/날짜 정보 블록 */
     .info-block {{
         display: flex;
         flex-direction: column;
         justify-content: center;
         height: 100%; 
+    }}
+    
+    /* [수정] 마크다운 깨짐 방지 및 스타일링 통일 */
+    .writer-name {{
+        font-weight: bold;
+        font-size: 1.05rem; /* 이름 폰트 크기 */
+    }}
+    .date-info {{
+        color: #777;
+        font-size: 0.9em;
+        margin-left: 10px;
     }}
 
     </style>
@@ -376,14 +387,20 @@ with tab1:
             
             for idx, row in filtered_df.iterrows():
                 with st.container(border=True):
-                    # [수정] 수직 가운데 정렬을 위해 st.columns를 사용하고 CSS 클래스(.info-block)로 정렬
+                    # [수정] 수직 가운데 정렬 및 마크다운 오류 해결
                     col_info, col_btn_edit, col_btn_del = st.columns([6, 1, 1])
                     
                     date_str = row['date'].strftime('%Y-%m-%d')
                     
                     with col_info:
-                        # [수정] info-block 클래스 적용
-                        st.markdown(f"<div class='info-block'>**{row['writer']}** <span style='color:#777; font-size:0.9em; margin-left:10px;'>({date_str} 작성)</span></div>", unsafe_allow_html=True)
+                        # 순수 HTML/CSS로 스타일링 적용 (마크다운 오류 해결)
+                        info_html = f"""
+                        <div class='info-block'>
+                            <span class='writer-name'>{row['writer']}</span>
+                            <span class='date-info'>({date_str} 작성)</span>
+                        </div>
+                        """
+                        st.markdown(info_html, unsafe_allow_html=True)
                     
                     with col_btn_edit:
                         # [수정] 버튼 크기 축소 (CSS로 적용)
