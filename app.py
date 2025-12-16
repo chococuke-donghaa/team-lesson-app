@@ -32,6 +32,9 @@ PURPLE_PALETTE = {
     800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
 }
 
+# Plotly 차트 배경색 헥스 코드 (NameError 우회를 위해 직접 사용)
+PLOTLY_BG_HEX = "#0E1117"
+
 def get_connection():
     return st.connection("gsheets", type=GSheetsConnection)
 
@@ -202,9 +205,9 @@ st.markdown(f"""
     div[data-testid="stMetricLabel"] {{ color: #9CA3AF !important; }}
     div[data-testid="stMetricValue"] {{ color: white !important; font-weight: 700 !important; }}
     
-    /* Plotly 배경색을 CARD_BG_COLOR로 강제하여 통일 */
-    .js-plotly-plot .plotly {{ background-color: {CARD_BG_COLOR} !important; }}
-    .modebar {{ background-color: {CARD_BG_COLOR} !important; border: 1px solid #30333F; border-top-left-radius: 5px; }}
+    /* Plotly 배경색을 PLOTLY_BG_HEX로 강제하여 통일 */
+    .js-plotly-plot .plotly {{ background-color: {PLOTLY_BG_HEX} !important; }}
+    .modebar {{ background-color: {PLOTLY_BG_HEX} !important; border: 1px solid #30333F; border-top-left-radius: 5px; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -404,7 +407,7 @@ with tab2:
             st.metric("가장 핫한 주제", top_cat)
             st.metric("누적 키워드", f"{len(set(all_kws))}개")
             st.metric("최다 작성자", top_writer)
-            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) # 높이 맞추기
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) 
 
         with col_tree_content:
             st.subheader("🗺️ Lesson Map (카테고리 비중)")
@@ -421,7 +424,8 @@ with tab2:
                     color='Value',
                     color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])]
                 )
-                fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=320, paper_bgcolor=CARD_BGCOLOR, plot_bgcolor=CARD_BGCOLOR)
+                # [수정] 차트 배경색을 헥스 코드로 직접 지정하여 NameError 우회
+                fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=320, paper_bgcolor=PLOTLY_BG_HEX, plot_bgcolor=PLOTLY_BG_HEX)
                 fig_tree.update_traces(textfont=dict(family="Pretendard", color="white", size=18))
                 st.plotly_chart(fig_tree, use_container_width=True)
             else:
@@ -440,8 +444,8 @@ with tab2:
                 cat_counts_pie.columns = ['category', 'count']
                 fig_pie = px.pie(cat_counts_pie, values='count', names='category', hole=0.5, 
                                  color_discrete_sequence=[PURPLE_PALETTE[x] for x in [500, 600, 700, 800, 900]])
-                # [수정] 차트 배경색 통일
-                fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20), paper_bgcolor=CARD_BGCOLOR, plot_bgcolor=CARD_BGCOLOR)
+                # [수정] 차트 배경색을 헥스 코드로 직접 지정하여 NameError 우회
+                fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20), paper_bgcolor=PLOTLY_BG_HEX, plot_bgcolor=PLOTLY_BG_HEX)
                 st.plotly_chart(fig_pie, use_container_width=True)
             else:
                 st.info("데이터 부족")
@@ -456,12 +460,12 @@ with tab2:
                     text=kw_counts['count'], textposition='outside',
                     marker=dict(color=PURPLE_PALETTE[600])
                 ))
-                # [수정] 차트 배경색 통일
+                # [수정] 차트 배경색을 헥스 코드로 직접 지정하여 NameError 우회
                 fig_bar.update_layout(
                     xaxis=dict(showgrid=False, visible=False), 
                     yaxis=dict(showgrid=False, autorange="reversed"),
                     height=350, margin=dict(t=20, b=20, l=10, r=40),
-                    paper_bgcolor=CARD_BGCOLOR, plot_bgcolor=CARD_BGCOLOR
+                    paper_bgcolor=PLOTLY_BG_HEX, plot_bgcolor=PLOTLY_BG_HEX
                 )
                 st.plotly_chart(fig_bar, use_container_width=True)
             else:
