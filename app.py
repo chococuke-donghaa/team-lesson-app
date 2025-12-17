@@ -112,7 +112,7 @@ def analyze_text(text):
     return ["#AI오류"], ["기타"], "None"
 
 # -----------------------------------------------------------------------------
-# 3. 주차 관련 함수 (안정화 버전)
+# 3. 주차 관련 함수
 # -----------------------------------------------------------------------------
 def get_week_label_and_start(date_obj):
     if pd.isna(date_obj): return None, None
@@ -197,11 +197,9 @@ tab1, tab2 = st.tabs(["📝 배움 기록하기", "📊 통합 대시보드"])
 with tab1:
     df = load_data()
     
-    # --- [수정] 수정 모드 UI (버튼 배치를 위해 form 미사용) ---
+    # --- 수정 모드 UI ---
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
-        
-        # 데이터 바인딩
         e_data = st.session_state['edit_data']
         writer_val = e_data.get('writer', '')
         text_val = e_data.get('text', '')
@@ -213,9 +211,7 @@ with tab1:
         new_date = c2.date_input("날짜", value=date_val)
         new_text = st.text_area("내용", value=text_val, height=300)
 
-        # [요청 반영] 버튼 좌우 배치 (수정 완료 / 취소)
         col_submit, col_cancel = st.columns([1, 1])
-        
         if col_submit.button("수정 완료", type="primary", use_container_width=True):
             if new_writer and new_text:
                 with st.spinner("AI 재분석 중..."):
@@ -227,12 +223,12 @@ with tab1:
             else:
                 st.error("내용을 입력하세요.")
 
-        if col_cancel.button("취소", use_container_width=True):
+        if col_cancel.button("취소하고 새 글 쓰기", use_container_width=True):
             st.session_state['edit_mode'] = False
             st.session_state['edit_data'] = {}
             st.rerun()
 
-    # --- 일반 입력 모드 (Form 사용) ---
+    # --- 일반 입력 모드 ---
     else:
         st.subheader("이번주의 레슨런을 기록해주세요")
         with st.form("record_form", clear_on_submit=True):
@@ -284,12 +280,11 @@ with tab1:
                 st.markdown("<hr>", unsafe_allow_html=True)
                 st.markdown(row['text'])
                 
-                # [수정] 키워드 ## 중복 제거 로직 적용
                 cats = parse_categories(row['category'])
                 try: kws_list = json.loads(row['keywords'])
                 except: kws_list = []
                 
-                # 샵 제거 후 다시 붙이기
+                # 키워드 # 중복 제거
                 kw_text = " ".join([f"#{k.replace('#', '')}" for k in kws_list])
                 badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
                 st.markdown(f"<div class='tag-container'>{badges} <span class='keyword-text'>{kw_text}</span></div>", unsafe_allow_html=True)
@@ -321,19 +316,21 @@ with tab2:
             fig = px.treemap(cat_counts, path=['Category'], values='Value', color='Value',
                              color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])])
             
-            # [수정] 회색 배경 제거 (앱 배경색과 일치)
             fig.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=350, template="plotly_dark",
                               paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR,
                               font=dict(color="white", family="Pretendard"), coloraxis_showscale=False)
             fig.update_traces(textfont=dict(size=18, color="white"), marker=dict(line=dict(width=1, color="#30333F")),
                               texttemplate="<b>%{label}</b><br>%{value}건")
             st.plotly_chart(fig, use_container_width=True, theme=None)
+        else:
+            st.info("데이터 부족")
         
         st.divider()
         st.subheader("📊 상세 분석")
         c_pie, c_bar = st.columns(2)
         
         with c_pie:
+            st.caption("Category Ratio")
             if all_cats:
                 fig_pie = px.pie(pd.Series(all_cats).value_counts().reset_index(name='count').rename(columns={'index':'category'}), 
                                  values='count', names='category', hole=0.5,
@@ -341,8 +338,10 @@ with tab2:
                 fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20), template="plotly_dark",
                                       paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
                 st.plotly_chart(fig_pie, use_container_width=True)
+            else: st.info("데이터 부족")
         
         with c_bar:
+            st.caption("Top 10 Keywords")
             if all_kws:
                 kw_counts = pd.Series(all_kws).value_counts().head(10).reset_index()
                 kw_counts.columns = ['keyword', 'count']
@@ -352,3 +351,40 @@ with tab2:
                                       height=350, margin=dict(t=20, b=20, l=10, r=40),
                                       paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR, template="plotly_dark")
                 st.plotly_chart(fig_bar, use_container_width=True)
+            else: st.info("데이터 부족")
+
+        # --- [복구됨] 전체 목록 필터링 (탭 2 하단) ---
+        st.divider()
+        st.subheader("🗂️ 전체 레슨런 목록 (카테고리 필터)")
+        
+        unique_categories = sorted(list(set(all_cats)))
+        
+        col_list_filter, _ = st.columns([1, 3])
+        with col_list_filter:
+            selected_cat_filter = st.selectbox("카테고리 선택", ["전체 보기"] + unique_categories, key="tab2_cat_filter")
+        
+        if selected_cat_filter == "전체 보기":
+            f_df_dash = df.copy()
+        else:
+            f_df_dash = df[df['category'].apply(lambda x: selected_cat_filter in parse_categories(x))]
+        
+        if not f_df_dash.empty:
+            f_df_dash = f_df_dash.sort_values(by="date", ascending=False)
+            st.caption(f"총 {len(f_df_dash)}건")
+            
+            for _, row in f_df_dash.iterrows():
+                with st.container(border=True):
+                    d_str = row['date'].strftime('%Y-%m-%d')
+                    st.markdown(f"<div class='info-block'><span class='writer-name'>{row['writer']}</span><span class='date-info'>{d_str}</span></div>", unsafe_allow_html=True)
+                    st.markdown("<hr>", unsafe_allow_html=True)
+                    st.markdown(row['text'])
+                    
+                    # 태그 표시
+                    cats = parse_categories(row['category'])
+                    try: kws_list = json.loads(row['keywords'])
+                    except: kws_list = []
+                    kw_text = " ".join([f"#{k.replace('#', '')}" for k in kws_list])
+                    badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
+                    st.markdown(f"<div class='tag-container'>{badges} <span class='keyword-text'>{kw_text}</span></div>", unsafe_allow_html=True)
+        else:
+            st.info("해당 카테고리의 글이 없습니다.")
