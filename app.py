@@ -227,7 +227,7 @@ with tab1:
             else:
                 st.error("내용을 입력하세요.")
 
-        if col_cancel.button("취소하고 새 글 쓰기", use_container_width=True):
+        if col_cancel.button("취소", use_container_width=True):
             st.session_state['edit_mode'] = False
             st.session_state['edit_data'] = {}
             st.rerun()
