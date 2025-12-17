@@ -284,7 +284,6 @@ with tab1:
                 try: kws_list = json.loads(row['keywords'])
                 except: kws_list = []
                 
-                # 키워드 # 중복 제거
                 kw_text = " ".join([f"#{k.replace('#', '')}" for k in kws_list])
                 badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
                 st.markdown(f"<div class='tag-container'>{badges} <span class='keyword-text'>{kw_text}</span></div>", unsafe_allow_html=True)
@@ -316,6 +315,7 @@ with tab2:
             fig = px.treemap(cat_counts, path=['Category'], values='Value', color='Value',
                              color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])])
             
+            # [수정] 마진을 0으로, 배경색을 앱 배경색으로 통일하여 회색 박스 제거
             fig.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=350, template="plotly_dark",
                               paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR,
                               font=dict(color="white", family="Pretendard"), coloraxis_showscale=False)
@@ -353,7 +353,6 @@ with tab2:
                 st.plotly_chart(fig_bar, use_container_width=True)
             else: st.info("데이터 부족")
 
-        # --- [복구됨] 전체 목록 필터링 (탭 2 하단) ---
         st.divider()
         st.subheader("🗂️ 전체 레슨런 목록 (카테고리 필터)")
         
