@@ -620,27 +620,29 @@ with tab2:
                 color='Value',
                 color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])]
             )
-            
+
+            # [핵심 수정] 투명이 아닌 앱의 메인 배경색(#0E1117)으로 강제 지정합니다.
             fig_tree.update_layout(
-                margin=dict(t=0, l=0, r=0, b=0), # 여백을 0으로 설정하여 꽉 차게
+                margin=dict(t=0, l=0, r=0, b=0),
                 height=350, 
                 template="plotly_dark", 
-                paper_bgcolor='rgba(0,0,0,0)', # 투명
-                plot_bgcolor='rgba(0,0,0,0)',  # 투명
-                font=dict(family="Pretendard", color="white") # 폰트 설정
+                paper_bgcolor=CARD_BG_COLOR, # 앱 배경색(#0E1117)과 동일하게 설정
+                plot_bgcolor=CARD_BG_COLOR,  # 앱 배경색(#0E1117)과 동일하게 설정
+                font=dict(color="white", family="Pretendard"), # 글자색 흰색 고정
+                coloraxis_showscale=False 
             )
 
             fig_tree.update_traces(
-                textfont=dict(size=18),
-                marker=dict(line=dict(width=0)) # 테두리 선 제거
+                textfont=dict(size=18, color="white"), # 글자색 흰색 다시 강조
+                marker=dict(line=dict(width=1, color="#30333F")), # 테두리 색상 조정
+                texttemplate="<b>%{label}</b><br>%{value}건"
             )
 
-            # [핵심 수정] theme=None 옵션을 반드시 추가해야 배경 투명화가 적용됩니다.
+            # theme=None을 사용하면 Plotly에 설정한 배경색이 Streamlit 간섭 없이 그대로 나옵니다.
             st.plotly_chart(fig_tree, use_container_width=True, theme=None)
         else:
             st.info("데이터 부족")
-
-        st.divider()
+                st.divider()
         
         # 3. 파이 차트 & 바 차트
         st.subheader("📊 상세 분석")
