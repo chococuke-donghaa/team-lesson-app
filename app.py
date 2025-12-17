@@ -624,8 +624,13 @@ with tab2:
                 color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])]
             )
             # [수정] 배경색 설정 및 template="plotly_dark" 사용
-            fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=350, template="plotly_dark", 
-                                   paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
+            fig_tree.update_layout(
+                        margin=dict(t=10, l=10, r=10, b=10), # 회색 테두리처럼 보이지 않게 여백을 살짝 조정
+                        height=350, 
+                        template="plotly_dark", 
+                        paper_bgcolor='rgba(0,0,0,0)', # 배경을 완전히 투명하게 설정
+                    plot_bgcolor='rgba(0,0,0,0)',  # 차트 영역 배경도 투명하게 설정
+            )
             fig_tree.update_traces(textfont=dict(family="Pretendard", color="white", size=18))
             st.plotly_chart(fig_tree, use_container_width=True)
         else:
