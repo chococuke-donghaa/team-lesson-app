@@ -12,10 +12,11 @@ from streamlit_gsheets import GSheetsConnection
 # -----------------------------------------------------------------------------
 # 1. 설정 및 기본 함수
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="Team Lesson Learned", layout="wide") # 페이지 설정은 항상 맨 처음에 와야 합니다.
+# [필수] set_page_config는 코드의 가장 첫 줄(import 제외)에 와야 합니다.
+st.set_page_config(page_title="Team Lesson Learned", layout="wide")
 
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
-CARD_BG_COLOR = "#0E1117" # 메인 카드 배경색
+CARD_BG_COLOR = "#0E1117" # 메인 카드 배경색 (Streamlit Dark 테마 기본 배경색)
 
 # 모델 우선순위
 MODEL_PRIORITY_LIST = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
@@ -211,7 +212,7 @@ with tab1:
         new_date = c2.date_input("날짜", value=date_val)
         new_text = st.text_area("내용", value=text_val, height=300)
 
-        # 버튼 나란히 배치
+        # [요청 반영] 버튼 나란히 배치
         col_submit, col_cancel = st.columns([1, 1])
         if col_submit.button("수정 완료", type="primary", use_container_width=True):
             if new_writer and new_text:
@@ -285,6 +286,7 @@ with tab1:
                 try: kws_list = json.loads(row['keywords'])
                 except: kws_list = []
                 
+                # [요청 반영] # 중복 제거
                 kw_text = " ".join([f"#{k.replace('#', '')}" for k in kws_list])
                 badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
                 st.markdown(f"<div class='tag-container'>{badges} <span class='keyword-text'>{kw_text}</span></div>", unsafe_allow_html=True)
@@ -316,22 +318,25 @@ with tab2:
             fig = px.treemap(cat_counts, path=['Category'], values='Value', color='Value',
                              color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])])
             
-            # [최종 해결책] 배경 완전 투명화 + 마진 0 + 루트 노드 투명화
+            # [최종 해결책] 투명(transparent) 대신 색상을 강제로 일치(Match)시키는 방법
             fig.update_layout(
                 margin=dict(t=0, l=0, r=0, b=0),
                 height=350,
                 template="plotly_dark",
-                paper_bgcolor='rgba(0,0,0,0)', # 전체 배경 투명
-                plot_bgcolor='rgba(0,0,0,0)',  # 차트 영역 투명
+                # 중요: 'rgba(0,0,0,0)' 투명 대신, 앱 배경색(#0E1117)으로 직접 덮어씌움
+                paper_bgcolor=CARD_BG_COLOR, 
+                plot_bgcolor=CARD_BG_COLOR,  
                 font=dict(color="white", family="Pretendard"), 
                 coloraxis_showscale=False
             )
+            # 중요: 트리맵의 부모 노드(root) 색상도 앱 배경색으로 덮어씌움
             fig.update_traces(
                 textfont=dict(size=18, color="white"), 
-                marker=dict(line=dict(width=0)), # 박스 경계선 없앰 (깔끔하게)
+                marker=dict(line=dict(width=1, color="#30333F")), 
                 texttemplate="<b>%{label}</b><br>%{value}건",
-                root_color='rgba(0,0,0,0)' # 중요: 루트 노드(배경판) 투명화
+                root_color=CARD_BG_COLOR 
             )
+            # theme=None으로 Streamlit 테마 간섭 차단
             st.plotly_chart(fig, use_container_width=True, theme=None)
         else:
             st.info("데이터 부족")
@@ -347,7 +352,7 @@ with tab2:
                                  values='count', names='category', hole=0.5,
                                  color_discrete_sequence=[PURPLE_PALETTE[x] for x in [500, 600, 700, 800, 900]])
                 fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20), template="plotly_dark",
-                                      paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+                                      paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
                 st.plotly_chart(fig_pie, use_container_width=True, theme=None)
             else: st.info("데이터 부족")
         
@@ -360,7 +365,7 @@ with tab2:
                                            marker=dict(color=PURPLE_PALETTE[600]), text=kw_counts['count'], textposition='outside'))
                 fig_bar.update_layout(xaxis=dict(visible=False), yaxis=dict(autorange="reversed"),
                                       height=350, margin=dict(t=20, b=20, l=10, r=40),
-                                      paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', template="plotly_dark")
+                                      paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR, template="plotly_dark")
                 st.plotly_chart(fig_bar, use_container_width=True, theme=None)
             else: st.info("데이터 부족")
 
@@ -392,7 +397,6 @@ with tab2:
                     cats = parse_categories(row['category'])
                     try: kws_list = json.loads(row['keywords'])
                     except: kws_list = []
-                    
                     kw_text = " ".join([f"#{k.replace('#', '')}" for k in kws_list])
                     badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
                     st.markdown(f"<div class='tag-container'>{badges} <span class='keyword-text'>{kw_text}</span></div>", unsafe_allow_html=True)
