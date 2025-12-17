@@ -13,7 +13,7 @@ from streamlit_gsheets import GSheetsConnection
 # 1. 설정 및 기본 함수
 # -----------------------------------------------------------------------------
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
-CARD_BG_COLOR = "#0E1117" # 메인 카드 배경색
+CARD_BG_COLOR = "#0E1117" # Streamlit 앱의 기본 어두운 배경색
 
 # 모델 우선순위
 MODEL_PRIORITY_LIST = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
@@ -197,7 +197,7 @@ tab1, tab2 = st.tabs(["📝 배움 기록하기", "📊 통합 대시보드"])
 with tab1:
     df = load_data()
     
-    # --- 수정 모드 UI ---
+    # --- 수정 모드 ---
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
         e_data = st.session_state['edit_data']
@@ -211,6 +211,7 @@ with tab1:
         new_date = c2.date_input("날짜", value=date_val)
         new_text = st.text_area("내용", value=text_val, height=300)
 
+        # [요청 반영] 버튼 나란히 배치
         col_submit, col_cancel = st.columns([1, 1])
         if col_submit.button("수정 완료", type="primary", use_container_width=True):
             if new_writer and new_text:
@@ -228,7 +229,7 @@ with tab1:
             st.session_state['edit_data'] = {}
             st.rerun()
 
-    # --- 일반 입력 모드 ---
+    # --- 일반 모드 ---
     else:
         st.subheader("이번주의 레슨런을 기록해주세요")
         with st.form("record_form", clear_on_submit=True):
@@ -284,6 +285,7 @@ with tab1:
                 try: kws_list = json.loads(row['keywords'])
                 except: kws_list = []
                 
+                # [요청 반영] # 중복 제거
                 kw_text = " ".join([f"#{k.replace('#', '')}" for k in kws_list])
                 badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
                 st.markdown(f"<div class='tag-container'>{badges} <span class='keyword-text'>{kw_text}</span></div>", unsafe_allow_html=True)
@@ -315,7 +317,8 @@ with tab2:
             fig = px.treemap(cat_counts, path=['Category'], values='Value', color='Value',
                              color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])])
             
-            # [수정] 마진을 0으로, 배경색을 앱 배경색으로 통일하여 회색 박스 제거
+            # [핵심] 1. paper_bgcolor/plot_bgcolor를 앱 배경색으로 강제 지정
+            # [핵심] 2. theme=None으로 Streamlit 간섭 차단 -> 회색 박스 제거
             fig.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=350, template="plotly_dark",
                               paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR,
                               font=dict(color="white", family="Pretendard"), coloraxis_showscale=False)
@@ -378,10 +381,10 @@ with tab2:
                     st.markdown("<hr>", unsafe_allow_html=True)
                     st.markdown(row['text'])
                     
-                    # 태그 표시
                     cats = parse_categories(row['category'])
                     try: kws_list = json.loads(row['keywords'])
                     except: kws_list = []
+                    # [요청 반영] # 중복 제거
                     kw_text = " ".join([f"#{k.replace('#', '')}" for k in kws_list])
                     badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
                     st.markdown(f"<div class='tag-container'>{badges} <span class='keyword-text'>{kw_text}</span></div>", unsafe_allow_html=True)
