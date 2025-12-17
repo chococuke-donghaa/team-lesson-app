@@ -609,13 +609,10 @@ with tab2:
         st.divider() 
         
         # 2. 트리맵 (Lesson Map) - 풀 너비
-        st.subheader("🗺️ Lesson Map (카테고리 비중)")
-        st.caption("가장 많은 기록이 있는 카테고리를 시각적으로 보여줍니다.")
         if all_cats_flat:
             cat_counts = pd.Series(all_cats_flat).value_counts().reset_index()
             cat_counts.columns = ['Category', 'Value']
-            
-            # Plotly Treemap
+    
             fig_tree = px.treemap(
                 cat_counts, 
                 path=['Category'], 
@@ -623,16 +620,23 @@ with tab2:
                 color='Value',
                 color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])]
             )
-            # [수정] 배경색 설정 및 template="plotly_dark" 사용
+            
             fig_tree.update_layout(
-                        margin=dict(t=10, l=10, r=10, b=10), # 회색 테두리처럼 보이지 않게 여백을 살짝 조정
-                        height=350, 
-                        template="plotly_dark", 
-                        paper_bgcolor='rgba(0,0,0,0)', # 배경을 완전히 투명하게 설정
-                    plot_bgcolor='rgba(0,0,0,0)',  # 차트 영역 배경도 투명하게 설정
+                margin=dict(t=0, l=0, r=0, b=0), # 여백을 0으로 설정하여 꽉 차게
+                height=350, 
+                template="plotly_dark", 
+                paper_bgcolor='rgba(0,0,0,0)', # 투명
+                plot_bgcolor='rgba(0,0,0,0)',  # 투명
+                font=dict(family="Pretendard", color="white") # 폰트 설정
             )
-            fig_tree.update_traces(textfont=dict(family="Pretendard", color="white", size=18))
-            st.plotly_chart(fig_tree, use_container_width=True)
+
+            fig_tree.update_traces(
+                textfont=dict(size=18),
+                marker=dict(line=dict(width=0)) # 테두리 선 제거
+            )
+
+            # [핵심 수정] theme=None 옵션을 반드시 추가해야 배경 투명화가 적용됩니다.
+            st.plotly_chart(fig_tree, use_container_width=True, theme=None)
         else:
             st.info("데이터 부족")
 
