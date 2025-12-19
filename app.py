@@ -12,14 +12,13 @@ from streamlit_gsheets import GSheetsConnection
 # -----------------------------------------------------------------------------
 # 1. 설정 및 기본 함수
 # -----------------------------------------------------------------------------
-# [필수] set_page_config는 코드의 가장 첫 줄(import 제외)에 와야 합니다.
 st.set_page_config(page_title="Team Lesson Learned", layout="wide")
 
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
-CARD_BG_COLOR = "#0E1117" # 메인 카드 배경색 (Streamlit Dark 테마 기본 배경색)
+CARD_BG_COLOR = "#0E1117" # 메인 카드 배경색 (앱 배경색과 동일)
 
 # 모델 우선순위
-MODEL_PRIORITY_LIST = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]
+MODEL_PRIORITY_LIST = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
 
 DEFAULT_CATEGORIES = ["기획", "디자인", "개발", "데이터", "QA", "비즈니스", "협업", "HR", "기타"]
 
@@ -143,7 +142,8 @@ def get_all_week_options(df):
     def parse_sort(label):
         if '년' in label:
             parts = label.split()
-            return datetime.date(2000 + int(parts[0][:-1]), int(parts[1][:-1]), 1)
+            try: return datetime.date(2000 + int(parts[0][:-1]), int(parts[1][:-1]), 1)
+            except: pass
         return datetime.date(2100, 1, 1)
     
     options.sort(key=parse_sort, reverse=True)
@@ -230,7 +230,7 @@ with tab1:
             st.session_state['edit_data'] = {}
             st.rerun()
 
-    # --- 일반 모드 ---
+    # --- 일반 입력 모드 ---
     else:
         st.subheader("이번주의 레슨런을 기록해주세요")
         with st.form("record_form", clear_on_submit=True):
@@ -310,7 +310,7 @@ with tab2:
         k4.metric("최다 작성자", df['writer'].mode()[0] if not df['writer'].empty else "-")
         
         st.divider()
-        st.subheader("🗺️ 카테고리 트리맵")
+        st.subheader("🗺️ Lesson Map (카테고리 비중)")
         if all_cats:
             cat_counts = pd.Series(all_cats).value_counts().reset_index()
             cat_counts.columns = ['Category', 'Value']
@@ -318,31 +318,30 @@ with tab2:
             fig = px.treemap(cat_counts, path=['Category'], values='Value', color='Value',
                              color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])])
             
-            # [최종 해결책] 투명(transparent) 대신 색상을 강제로 일치(Match)시키는 방법
+            # [최종 해결] 템플릿 제거 및 배경색 '강제 주입'
             fig.update_layout(
                 margin=dict(t=0, l=0, r=0, b=0),
                 height=350,
-                template="plotly_dark",
-                # 중요: 'rgba(0,0,0,0)' 투명 대신, 앱 배경색(#0E1117)으로 직접 덮어씌움
-                paper_bgcolor=CARD_BG_COLOR, 
-                plot_bgcolor=CARD_BG_COLOR,  
+                # template="plotly_dark", # 기본 회색 배경의 원인이므로 제거
+                paper_bgcolor=CARD_BG_COLOR, # 앱 배경색으로 강제 설정
+                plot_bgcolor=CARD_BG_COLOR,
                 font=dict(color="white", family="Pretendard"), 
                 coloraxis_showscale=False
             )
-            # 중요: 트리맵의 부모 노드(root) 색상도 앱 배경색으로 덮어씌움
             fig.update_traces(
                 textfont=dict(size=18, color="white"), 
                 marker=dict(line=dict(width=1, color="#30333F")), 
                 texttemplate="<b>%{label}</b><br>%{value}건",
-                root_color=CARD_BG_COLOR 
+                root_color=CARD_BG_COLOR # [중요] 부모 노드 배경색도 앱 배경색으로 설정
             )
-            # theme=None으로 Streamlit 테마 간섭 차단
             st.plotly_chart(fig, use_container_width=True, theme=None)
         else:
             st.info("데이터 부족")
         
         st.divider()
-        st.subh        st.subheader("📊 키워드 분석") c_bar = st.columns(2)
+        # [수정 완료] 이전에 문법 오류가 발생했던 부분을 정상적으로 수정했습니다.
+        st.subheader("📊 상세 분석")
+        c_pie, c_bar = st.columns(2)
         
         with c_pie:
             st.caption("Category Ratio")
@@ -396,6 +395,7 @@ with tab2:
                     cats = parse_categories(row['category'])
                     try: kws_list = json.loads(row['keywords'])
                     except: kws_list = []
+                    
                     kw_text = " ".join([f"#{k.replace('#', '')}" for k in kws_list])
                     badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
                     st.markdown(f"<div class='tag-container'>{badges} <span class='keyword-text'>{kw_text}</span></div>", unsafe_allow_html=True)
