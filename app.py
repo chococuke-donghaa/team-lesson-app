@@ -310,7 +310,7 @@ with tab2:
         k4.metric("최다 작성자", df['writer'].mode()[0] if not df['writer'].empty else "-")
         
         st.divider()
-        st.subheader("🗺️ 카테고리 트리맵""
+        st.subheader("🗺️ 카테고리 트리맵"
         if all_cats:
             cat_counts = pd.Series(all_cats).value_counts().reset_index()
             cat_counts.columns = ['Category', 'Value']
