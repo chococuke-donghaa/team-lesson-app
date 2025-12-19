@@ -19,7 +19,7 @@ GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets 
 CARD_BG_COLOR = "#0E1117" # 메인 카드 배경색 (Streamlit Dark 테마 기본 배경색)
 
 # 모델 우선순위
-MODEL_PRIORITY_LIST = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
+MODEL_PRIORITY_LIST = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]
 
 DEFAULT_CATEGORIES = ["기획", "디자인", "개발", "데이터", "QA", "비즈니스", "협업", "HR", "기타"]
 
