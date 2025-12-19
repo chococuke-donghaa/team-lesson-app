@@ -310,7 +310,7 @@ with tab2:
         k4.metric("최다 작성자", df['writer'].mode()[0] if not df['writer'].empty else "-")
         
         st.divider()
-        st.subheader("🗺️ Lesson Map (카테고리 비중)")
+        st.subheader("🗺️ 카테고리 트리맵""
         if all_cats:
             cat_counts = pd.Series(all_cats).value_counts().reset_index()
             cat_counts.columns = ['Category', 'Value']
@@ -342,8 +342,7 @@ with tab2:
             st.info("데이터 부족")
         
         st.divider()
-        st.subheader("📊 상세 분석")
-        c_pie, c_bar = st.columns(2)
+        st.subh        st.subheader("📊 키워드 분석") c_bar = st.columns(2)
         
         with c_pie:
             st.caption("Category Ratio")
