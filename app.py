@@ -176,26 +176,18 @@ def confirm_delete_dialog(entry_id):
         delete_entry(entry_id); st.rerun()
     if c2.button("취소", use_container_width=True): st.rerun()
 
-# [중요] 강제 색상 CSS를 모두 제거하고, 라이트/다크 모드에 반응하는 유동적 스타일 적용
 st.markdown(f"""
     <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
     * {{ font-family: 'Pretendard', sans-serif !important; }}
     
-    /* 태그 컨테이너 */
     .tag-container {{ margin-top: 10px; margin-bottom: 20px; }}
-    
-    /* 구분선 스타일 (투명도 조절로 다크/라이트 모두 대응) */
     hr {{ margin: 5px 0 5px 0; border-top: 1px solid rgba(128, 128, 128, 0.2); }}
-    
-    /* 버튼 크기 조정 */
     div[data-testid="stButton"] > button {{ padding-top: 4px; padding-bottom: 4px; font-size: 0.75rem; }}
     
-    /* 뱃지와 키워드는 포인트 컬러이므로 색상 유지 */
     .cat-badge {{ background-color: {PURPLE_PALETTE[800]}; color: white !important; padding: 3px 6px; border-radius: 10px; font-size: 0.8rem; font-weight: 500; margin-right: 5px; }}
     .keyword-text {{ color: {PURPLE_PALETTE[400]}; font-size: 0.8rem; font-weight: 500; }}
     
-    /* 작성자 이름 강조 (색상 지정 제거 -> 시스템 테마 따름) */
     .writer-name {{ font-weight: bold; font-size: 1.05rem; }}
     .date-info {{ color: gray; font-size: 0.9em; margin-left: 10px; }}
     </style>
@@ -277,7 +269,6 @@ with tab1:
                 c_info, c_edit, c_del = st.columns([6, 1, 1])
                 d_str = row['date'].strftime('%Y-%m-%d')
                 
-                # [수정] 색상 강제 제거 -> 시스템 테마에 맞춰 자동(검정/흰색)으로 표시됨
                 st.markdown(f"<div class='info-block'><span class='writer-name'>{row['writer']}</span><span class='date-info'>({d_str} 작성)</span></div>", unsafe_allow_html=True)
                 
                 if c_edit.button("수정", key=f"edit_{row['id']}", use_container_width=True):
@@ -311,7 +302,6 @@ with tab2:
 
         st.subheader("Key Metrics")
         k1, k2, k3, k4 = st.columns(4)
-        # [수정] 메트릭 카드 배경색 강제 제거 -> Streamlit 기본 스타일 사용 (라이트/다크 자동 대응)
         k1.metric("총 기록 수", f"{len(df)}건")
         k2.metric("Top 카테고리", pd.Series(all_cats).mode()[0] if all_cats else "-")
         k3.metric("누적 키워드", f"{len(set(all_kws))}개")
@@ -326,23 +316,20 @@ with tab2:
             fig = px.treemap(cat_counts, path=['Category'], values='Value', color='Value',
                              color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])])
             
-            # [최종 해결책] 배경 투명화 + 글자색 자동화 + 루트 투명화
+            # [최종 해결] 부모 상자(Root)까지 완전 투명화
             fig.update_layout(
                 margin=dict(t=0, l=0, r=0, b=0),
                 height=350,
-                # template="plotly_dark", # [삭제] 다크 템플릿 제거 -> 라이트 모드에서 검은 글씨 자동 적용
-                paper_bgcolor="rgba(0,0,0,0)", # [중요] 배경 투명 -> 앱 배경(흰색/검은색)이 그대로 보임
+                paper_bgcolor="rgba(0,0,0,0)", 
                 plot_bgcolor="rgba(0,0,0,0)",
-                # font=dict(color="white"), # [삭제] 글자색 고정 제거 -> 자동 색상
                 coloraxis_showscale=False
             )
             fig.update_traces(
-                textfont=dict(size=18), # 색상 지정 제거
-                marker=dict(line=dict(width=0)), # 경계선 제거
+                textfont=dict(size=18), 
+                marker=dict(line=dict(width=0)),
                 texttemplate="<b>%{label}</b><br>%{value}건",
-                root_color="rgba(0,0,0,0)" # [중요] 부모 노드 배경 투명화
+                root_color="rgba(0,0,0,0)" # [핵심] 이것이 없으면 트리맵 배경에 회색 박스가 생깁니다.
             )
-            # [중요] theme=None 제거 -> Streamlit 기본 테마 사용 (라이트/다크 자동 전환)
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("데이터 부족")
