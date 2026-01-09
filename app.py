@@ -176,6 +176,7 @@ def confirm_delete_dialog(entry_id):
         delete_entry(entry_id); st.rerun()
     if c2.button("취소", use_container_width=True): st.rerun()
 
+# [CSS는 오직 HTML 태그 스타일링 용도입니다. 차트 색상 강제 CSS는 없습니다.]
 st.markdown(f"""
     <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
@@ -316,20 +317,23 @@ with tab2:
             fig = px.treemap(cat_counts, path=['Category'], values='Value', color='Value',
                              color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])])
             
-            # [최종 해결] 부모 상자(Root)까지 완전 투명화
+            # [순수 Python 해결] Streamlit 테마 사용 + 배경 투명화
             fig.update_layout(
                 margin=dict(t=0, l=0, r=0, b=0),
                 height=350,
-                paper_bgcolor="rgba(0,0,0,0)", 
+                # paper_bgcolor, plot_bgcolor: 투명으로 설정하여 앱 배경(흰색/검은색)을 그대로 투과시킴
+                paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
                 coloraxis_showscale=False
             )
             fig.update_traces(
-                textfont=dict(size=18), 
-                marker=dict(line=dict(width=0)),
-                texttemplate="<b>%{label}</b><br>%{value}건",
-                root_color="rgba(0,0,0,0)" # [핵심] 이것이 없으면 트리맵 배경에 회색 박스가 생깁니다.
+                textfont=dict(size=18),
+                # [핵심] 트리맵의 '부모 상자(Root Node)' 색상을 투명하게 만듦 (회색 박스 원인 제거)
+                root_color="rgba(0,0,0,0)",
+                marker=dict(line=dict(width=0)) # 박스 외곽선 제거
             )
+            
+            # use_container_width=True만 사용하여 Streamlit 테마 자동 적용 (글자색 자동 반전)
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("데이터 부족")
