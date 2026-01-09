@@ -15,8 +15,6 @@ from streamlit_gsheets import GSheetsConnection
 st.set_page_config(page_title="Team Lesson Learned", layout="wide")
 
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
-# 차트와 메트릭에만 사용할 다크 배경색 (앱 전체 강제 아님)
-CARD_BG_COLOR = "#0E1117" 
 
 # 모델 우선순위
 MODEL_PRIORITY_LIST = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
@@ -35,7 +33,6 @@ def get_connection():
 def load_data():
     conn = get_connection()
     try:
-        # 쿼터 제한 방지를 위해 TTL 설정
         df = conn.read(ttl=5)
         if df.empty:
             return pd.DataFrame(columns=["id", "date", "writer", "text", "keywords", "category"])
@@ -120,7 +117,6 @@ def analyze_text(text):
 # -----------------------------------------------------------------------------
 def get_week_label_and_start(date_obj):
     if pd.isna(date_obj): return None, None
-    # 날짜 타입 안전 변환
     if not isinstance(date_obj, pd.Timestamp):
         date_obj = pd.to_datetime(date_obj).normalize()
     
@@ -180,31 +176,28 @@ def confirm_delete_dialog(entry_id):
         delete_entry(entry_id); st.rerun()
     if c2.button("취소", use_container_width=True): st.rerun()
 
-# [수정] 충돌을 일으키는 강제 CSS 제거하고, 태그/뱃지 스타일만 최소한으로 적용
+# [중요] 강제 색상 CSS를 모두 제거하고, 라이트/다크 모드에 반응하는 유동적 스타일 적용
 st.markdown(f"""
     <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
     * {{ font-family: 'Pretendard', sans-serif !important; }}
     
-    /* 태그 및 메트릭 스타일 (라이트/다크 모드 공통 호환) */
-    div[data-testid="stMetric"] {{ 
-        background-color: {CARD_BG_COLOR}; 
-        border: 1px solid #30333F; 
-        padding: 15px; 
-        border-radius: 10px; 
-    }}
-    div[data-testid="stMetricLabel"] label {{ color: #9CA3AF !important; }}
-    div[data-testid="stMetricValue"] {{ color: white !important; font-weight: 700 !important; }}
-    
+    /* 태그 컨테이너 */
     .tag-container {{ margin-top: 10px; margin-bottom: 20px; }}
-    hr {{ margin: 5px 0 5px 0; border-top: 1px solid #30333F; }}
+    
+    /* 구분선 스타일 (투명도 조절로 다크/라이트 모두 대응) */
+    hr {{ margin: 5px 0 5px 0; border-top: 1px solid rgba(128, 128, 128, 0.2); }}
     
     /* 버튼 크기 조정 */
     div[data-testid="stButton"] > button {{ padding-top: 4px; padding-bottom: 4px; font-size: 0.75rem; }}
     
-    /* 레슨런 카드 내 텍스트 (다크 배경인 차트와 어울리도록) */
+    /* 뱃지와 키워드는 포인트 컬러이므로 색상 유지 */
     .cat-badge {{ background-color: {PURPLE_PALETTE[800]}; color: white !important; padding: 3px 6px; border-radius: 10px; font-size: 0.8rem; font-weight: 500; margin-right: 5px; }}
     .keyword-text {{ color: {PURPLE_PALETTE[400]}; font-size: 0.8rem; font-weight: 500; }}
+    
+    /* 작성자 이름 강조 (색상 지정 제거 -> 시스템 테마 따름) */
+    .writer-name {{ font-weight: bold; font-size: 1.05rem; }}
+    .date-info {{ color: gray; font-size: 0.9em; margin-left: 10px; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -214,7 +207,6 @@ tab1, tab2 = st.tabs(["📝 배움 기록하기", "📊 통합 대시보드"])
 with tab1:
     df = load_data()
     
-    # --- 수정 모드 ---
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
         e_data = st.session_state['edit_data']
@@ -245,7 +237,6 @@ with tab1:
             st.session_state['edit_data'] = {}
             st.rerun()
 
-    # --- 일반 모드 ---
     else:
         st.subheader("이번주의 레슨런을 기록해주세요")
         with st.form("record_form", clear_on_submit=True):
@@ -286,8 +277,8 @@ with tab1:
                 c_info, c_edit, c_del = st.columns([6, 1, 1])
                 d_str = row['date'].strftime('%Y-%m-%d')
                 
-                # 라이트모드에서도 잘 보이도록 작성자 이름에만 HTML span 사용 (색상 강제 아님)
-                c_info.markdown(f"**{row['writer']}** <span style='color:#9CA3AF; font-size:0.9em'>({d_str})</span>", unsafe_allow_html=True)
+                # [수정] 색상 강제 제거 -> 시스템 테마에 맞춰 자동(검정/흰색)으로 표시됨
+                st.markdown(f"<div class='info-block'><span class='writer-name'>{row['writer']}</span><span class='date-info'>({d_str} 작성)</span></div>", unsafe_allow_html=True)
                 
                 if c_edit.button("수정", key=f"edit_{row['id']}", use_container_width=True):
                     st.session_state['edit_mode'] = True
@@ -303,7 +294,6 @@ with tab1:
                 try: kws_list = json.loads(row['keywords'])
                 except: kws_list = []
                 
-                # [요청 반영] ## 중복 제거 로직
                 kw_text = " ".join([f"#{k.replace('#', '')}" for k in kws_list])
                 badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
                 st.markdown(f"<div class='tag-container'>{badges} <span class='keyword-text'>{kw_text}</span></div>", unsafe_allow_html=True)
@@ -321,6 +311,7 @@ with tab2:
 
         st.subheader("Key Metrics")
         k1, k2, k3, k4 = st.columns(4)
+        # [수정] 메트릭 카드 배경색 강제 제거 -> Streamlit 기본 스타일 사용 (라이트/다크 자동 대응)
         k1.metric("총 기록 수", f"{len(df)}건")
         k2.metric("Top 카테고리", pd.Series(all_cats).mode()[0] if all_cats else "-")
         k3.metric("누적 키워드", f"{len(set(all_kws))}개")
@@ -335,28 +326,24 @@ with tab2:
             fig = px.treemap(cat_counts, path=['Category'], values='Value', color='Value',
                              color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])])
             
-            # [최종 해결책: 라이브러리 네이티브 기능 사용]
+            # [최종 해결책] 배경 투명화 + 글자색 자동화 + 루트 투명화
             fig.update_layout(
                 margin=dict(t=0, l=0, r=0, b=0),
                 height=350,
-                template="plotly_dark",
-                # 투명 배경 대신 앱 배경색과 동일하게 '일치'시킴 (가장 확실함)
-                paper_bgcolor=CARD_BG_COLOR,
-                plot_bgcolor=CARD_BG_COLOR,
-                font=dict(color="white", family="Pretendard"), 
+                # template="plotly_dark", # [삭제] 다크 템플릿 제거 -> 라이트 모드에서 검은 글씨 자동 적용
+                paper_bgcolor="rgba(0,0,0,0)", # [중요] 배경 투명 -> 앱 배경(흰색/검은색)이 그대로 보임
+                plot_bgcolor="rgba(0,0,0,0)",
+                # font=dict(color="white"), # [삭제] 글자색 고정 제거 -> 자동 색상
                 coloraxis_showscale=False
             )
-            
-            # [핵심] 트리맵의 'Root(부모 상자)' 색상을 앱 배경색으로 강제 지정
-            # 이것이 없으면 Plotly 테마의 기본 회색이 튀어나옵니다.
             fig.update_traces(
-                textfont=dict(size=18, color="white"), 
+                textfont=dict(size=18), # 색상 지정 제거
                 marker=dict(line=dict(width=0)), # 경계선 제거
                 texttemplate="<b>%{label}</b><br>%{value}건",
-                root_color=CARD_BG_COLOR 
+                root_color="rgba(0,0,0,0)" # [중요] 부모 노드 배경 투명화
             )
-            # theme=None으로 Streamlit 테마 간섭 차단
-            st.plotly_chart(fig, use_container_width=True, theme=None)
+            # [중요] theme=None 제거 -> Streamlit 기본 테마 사용 (라이트/다크 자동 전환)
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("데이터 부족")
         
@@ -370,9 +357,9 @@ with tab2:
                 fig_pie = px.pie(pd.Series(all_cats).value_counts().reset_index(name='count').rename(columns={'index':'category'}), 
                                  values='count', names='category', hole=0.5,
                                  color_discrete_sequence=[PURPLE_PALETTE[x] for x in [500, 600, 700, 800, 900]])
-                fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20), template="plotly_dark",
-                                      paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
-                st.plotly_chart(fig_pie, use_container_width=True, theme=None)
+                fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20),
+                                      paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                st.plotly_chart(fig_pie, use_container_width=True)
             else: st.info("데이터 부족")
         
         with c_bar:
@@ -384,8 +371,8 @@ with tab2:
                                            marker=dict(color=PURPLE_PALETTE[600]), text=kw_counts['count'], textposition='outside'))
                 fig_bar.update_layout(xaxis=dict(visible=False), yaxis=dict(autorange="reversed"),
                                       height=350, margin=dict(t=20, b=20, l=10, r=40),
-                                      paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR, template="plotly_dark")
-                st.plotly_chart(fig_bar, use_container_width=True, theme=None)
+                                      paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                st.plotly_chart(fig_bar, use_container_width=True)
             else: st.info("데이터 부족")
 
         st.divider()
@@ -409,15 +396,13 @@ with tab2:
             for _, row in f_df_dash.iterrows():
                 with st.container(border=True):
                     d_str = row['date'].strftime('%Y-%m-%d')
-                    # 라이트/다크 모두 잘 보이도록 기본 텍스트 색상 사용 (HTML 강제 색상 제거)
-                    st.markdown(f"**{row['writer']}** ({d_str})")
+                    st.markdown(f"<div class='info-block'><span class='writer-name'>{row['writer']}</span><span class='date-info'>{d_str}</span></div>", unsafe_allow_html=True)
                     st.markdown("<hr>", unsafe_allow_html=True)
                     st.markdown(row['text'])
                     
                     cats = parse_categories(row['category'])
                     try: kws_list = json.loads(row['keywords'])
                     except: kws_list = []
-                    
                     kw_text = " ".join([f"#{k.replace('#', '')}" for k in kws_list])
                     badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
                     st.markdown(f"<div class='tag-container'>{badges} <span class='keyword-text'>{kw_text}</span></div>", unsafe_allow_html=True)
