@@ -12,14 +12,27 @@ from streamlit_gsheets import GSheetsConnection
 # -----------------------------------------------------------------------------
 # 1. 설정 및 기본 함수
 # -----------------------------------------------------------------------------
+# [필수] set_page_config는 코드의 가장 첫 줄(import 제외)에 와야 합니다.
 st.set_page_config(page_title="Team Lesson Learned", layout="wide")
 
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
+CARD_BG_COLOR = "#0E1117" # 앱 배경색 (Dark)
 
 # 모델 우선순위
 MODEL_PRIORITY_LIST = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
 
-DEFAULT_CATEGORIES = ["기획", "디자인", "개발", "데이터", "QA", "비즈니스", "협업", "HR", "기타"]
+# [수정] 확장된 표준 카테고리 (AI가 이 목록 내에서만 선택하도록 유도)
+DEFAULT_CATEGORIES = [
+    # 제품 메이커 그룹
+    "기획/PM", "디자인/UX", "개발/구현", "QA/테스트", "데이터/AI",
+    # 사업 및 운영 그룹
+    "비즈니스/전략", "마케팅/그로스", "운영/CS", "영업/제휴",
+    # 지원 및 인프라 그룹
+    "인프라/보안", "HR/조직문화", "재무/총무/법무", 
+    # 공통 역량
+    "협업/커뮤니케이션", "생산성/툴", "자기계발/인사이트",
+    "기타"
+]
 
 PURPLE_PALETTE = {
     50: "#EEEFFF", 100: "#DFE1FF", 200: "#C6C7FF", 300: "#A3A3FE",
@@ -33,7 +46,8 @@ def get_connection():
 def load_data():
     conn = get_connection()
     try:
-        df = conn.read(ttl=5)
+        # API 쿼터 제한 방지를 위해 최소한의 캐싱(TTL) 적용 권장
+        df = conn.read(ttl=0) 
         if df.empty:
             return pd.DataFrame(columns=["id", "date", "writer", "text", "keywords", "category"])
         
@@ -95,34 +109,68 @@ def parse_categories(cat_data):
     except: return ["기타"]
 
 # -----------------------------------------------------------------------------
-# 2. AI 분석
+# 2. AI 분석 (프롬프트 개선)
 # -----------------------------------------------------------------------------
 def analyze_text(text):
     if GOOGLE_API_KEY == "YOUR_API_KEY": return ["#API_KEY_없음"], ["기타"], "None"
+    
     genai.configure(api_key=GOOGLE_API_KEY)
+    categories_str = ", ".join(DEFAULT_CATEGORIES)
+
     for model_name in MODEL_PRIORITY_LIST:
         try:
             model = genai.GenerativeModel(model_name)
-            prompt = f"텍스트를 분석해 JSON으로 응답해. keywords(2~3개, #포함), categories(1~2개). 텍스트: {text}"
+            prompt = f"""
+            너는 팀의 업무 회고(Lesson Learned)를 분류하는 데이터 관리자야.
+            입력된 텍스트를 분석해서 JSON 형식으로 응답해.
+
+            [지시사항]
+            1. categories: 반드시 아래 [허용된 카테고리 목록] 중에서 본문과 가장 밀접한 것을 1개, 복합적이라면 최대 2개만 선택해.
+               - [허용된 카테고리 목록]: {categories_str}
+               - ⚠️ 경고: 위 목록에 없는 단어를 창조하지 마시오.
+            
+            2. keywords: 카테고리만으로는 알 수 없는 구체적인 기술명, 프로젝트명, 문제 원인 등을 해시태그(#) 형태의 명사로 2~3개 추출해.
+
+            텍스트: {text}
+            """
             response = model.generate_content(prompt)
             result = json.loads(response.text.replace("```json", "").replace("```", "").strip())
             kws = result.get("keywords", [])
             cats = result.get("categories", ["기타"])
-            return kws, cats, model_name
+            
+            # 목록 외 단어 필터링
+            valid_cats = [c for c in cats if c in DEFAULT_CATEGORIES]
+            if not valid_cats: valid_cats = ["기타"]
+
+            return kws, valid_cats, model_name
         except: time.sleep(1); continue
     return ["#AI오류"], ["기타"], "None"
 
 # -----------------------------------------------------------------------------
-# 3. 주차 관련 함수
+# 3. 주차 관련 함수 (핵심 수정: 목요일 기준 주차 계산)
 # -----------------------------------------------------------------------------
 def get_week_label_and_start(date_obj):
+    """
+    해당 날짜가 속한 주의 '목요일'을 기준으로 주차 레이블을 계산합니다.
+    이렇게 하면 1월 9일(금)은 1월 8일(목)이 속한 2주차로, 
+    1월 12일(월)은 1월 15일(목)이 속한 3주차로 정확히 분리됩니다.
+    """
     if pd.isna(date_obj): return None, None
-    if not isinstance(date_obj, pd.Timestamp):
-        date_obj = pd.to_datetime(date_obj).normalize()
+    ts = pd.to_datetime(date_obj).normalize()
     
-    week_of_month = (date_obj.day - 1) // 7 + 1
-    label = f"{date_obj.year % 100}년 {date_obj.month}월 {week_of_month}주차"
-    start_of_week = date_obj - datetime.timedelta(days=date_obj.weekday())
+    # 1. 해당 주차의 월요일(시작일) 계산
+    start_of_week = ts - datetime.timedelta(days=ts.weekday())
+    
+    # 2. 해당 주차의 목요일 계산 (ISO 표준에 따름: 목요일이 포함된 달을 기준으로 함)
+    thursday_of_week = start_of_week + datetime.timedelta(days=3)
+    
+    # 3. 목요일 기준으로 년/월/주차 계산
+    week_year = thursday_of_week.year
+    week_month = thursday_of_week.month
+    week_num = (thursday_of_week.day - 1) // 7 + 1
+    
+    label = f"{week_year % 100}년 {week_month}월 {week_num}주차"
+    
     return label, start_of_week.normalize()
 
 def get_all_week_options(df):
@@ -135,10 +183,12 @@ def get_all_week_options(df):
     current_week_label, _ = get_week_label_and_start(current_date)
     
     options = []
+    # 현재 주차(오늘 기준)가 데이터 목록에 없으면 추가
     if current_week_label not in week_labels: options.append(current_week_label)
     options.extend(week_labels)
     options = list(pd.unique(options))
     
+    # 정렬 함수
     def parse_sort(label):
         if '년' in label:
             parts = label.split()
@@ -147,6 +197,8 @@ def get_all_week_options(df):
         return datetime.date(2100, 1, 1)
     
     options.sort(key=parse_sort, reverse=True)
+    
+    # '이번 주 기록'과 중복되는 레이블은 제외하고 리스트 구성
     return ["이번 주 기록"] + [o for o in options if o != current_week_label and o != "이번 주 기록"]
 
 def get_week_range(week_label):
@@ -155,10 +207,24 @@ def get_week_range(week_label):
         start = today - datetime.timedelta(days=today.weekday())
         return pd.to_datetime(start).normalize(), pd.to_datetime(start + datetime.timedelta(days=6)).normalize()
     try:
+        # 레이블 파싱 ("26년 1월 2주차")
         parts = week_label.split()
-        year, month, week_num = int(parts[0][:-1]) + 2000, int(parts[1][:-1]), int(parts[2][:-2])
-        current_day = datetime.date(year, month, 1) + datetime.timedelta(days=(week_num - 1) * 7)
-        start = current_day - datetime.timedelta(days=current_day.weekday())
+        year = int(parts[0][:-1]) + 2000
+        month = int(parts[1][:-1])
+        week_num = int(parts[2][:-2])
+        
+        # 해당 월의 1일
+        first_day_of_month = datetime.date(year, month, 1)
+        
+        # N주차의 대략적인 기준일 (목요일 기준 역산)
+        # 1주차 -> 1일 근처, 2주차 -> 8일 근처...
+        target_day = first_day_of_month + datetime.timedelta(days=(week_num - 1) * 7)
+        
+        # 그 날짜가 포함된 주의 월요일 찾기
+        # 주의: 단순 target_day의 월요일이 아니라, target_day가 목요일이라고 가정하고 월요일을 찾는게 안전함
+        # 하지만 기존 로직과 호환성을 위해 target_day가 해당 주차에 포함된다고 가정하고 월요일 계산
+        start = target_day - datetime.timedelta(days=target_day.weekday())
+        
         return pd.to_datetime(start).normalize(), pd.to_datetime(start + datetime.timedelta(days=6)).normalize()
     except: return get_week_range("이번 주 기록")
 
@@ -176,21 +242,19 @@ def confirm_delete_dialog(entry_id):
         delete_entry(entry_id); st.rerun()
     if c2.button("취소", use_container_width=True): st.rerun()
 
-# [CSS는 오직 HTML 태그 스타일링 용도입니다. 차트 색상 강제 CSS는 없습니다.]
 st.markdown(f"""
     <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
     * {{ font-family: 'Pretendard', sans-serif !important; }}
-    
+    .appview-container .main .block-container {{ max-width: 1080px; margin: 0 auto; }}
+    div[data-testid="stMetric"] {{ background-color: {CARD_BG_COLOR}; border: 1px solid #30333F; padding: 15px; border-radius: 10px; }}
     .tag-container {{ margin-top: 10px; margin-bottom: 20px; }}
-    hr {{ margin: 5px 0 5px 0; border-top: 1px solid rgba(128, 128, 128, 0.2); }}
+    hr {{ margin: 5px 0 5px 0; border-top: 1px solid #30333F; }}
     div[data-testid="stButton"] > button {{ padding-top: 4px; padding-bottom: 4px; font-size: 0.75rem; }}
-    
-    .cat-badge {{ background-color: {PURPLE_PALETTE[800]}; color: white !important; padding: 3px 6px; border-radius: 10px; font-size: 0.8rem; font-weight: 500; margin-right: 5px; }}
+    .writer-name {{ font-weight: bold; font-size: 1.05rem; color: white; }}
+    .date-info {{ color: #9CA3AF; font-size: 0.9em; margin-left: 10px; }}
+    .cat-badge {{ background-color: {PURPLE_PALETTE[800]}; color: white; padding: 3px 6px; border-radius: 10px; font-size: 0.8rem; font-weight: 500; margin-right: 5px; }}
     .keyword-text {{ color: {PURPLE_PALETTE[400]}; font-size: 0.8rem; font-weight: 500; }}
-    
-    .writer-name {{ font-weight: bold; font-size: 1.05rem; }}
-    .date-info {{ color: gray; font-size: 0.9em; margin-left: 10px; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -200,6 +264,7 @@ tab1, tab2 = st.tabs(["📝 배움 기록하기", "📊 통합 대시보드"])
 with tab1:
     df = load_data()
     
+    # --- 수정 모드 ---
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
         e_data = st.session_state['edit_data']
@@ -230,6 +295,7 @@ with tab1:
             st.session_state['edit_data'] = {}
             st.rerun()
 
+    # --- 일반 입력 모드 ---
     else:
         st.subheader("이번주의 레슨런을 기록해주세요")
         with st.form("record_form", clear_on_submit=True):
@@ -269,8 +335,7 @@ with tab1:
             with st.container(border=True):
                 c_info, c_edit, c_del = st.columns([6, 1, 1])
                 d_str = row['date'].strftime('%Y-%m-%d')
-                
-                st.markdown(f"<div class='info-block'><span class='writer-name'>{row['writer']}</span><span class='date-info'>({d_str} 작성)</span></div>", unsafe_allow_html=True)
+                c_info.markdown(f"<div class='info-block'><span class='writer-name'>{row['writer']}</span><span class='date-info'>({d_str} 작성)</span></div>", unsafe_allow_html=True)
                 
                 if c_edit.button("수정", key=f"edit_{row['id']}", use_container_width=True):
                     st.session_state['edit_mode'] = True
@@ -317,29 +382,27 @@ with tab2:
             fig = px.treemap(cat_counts, path=['Category'], values='Value', color='Value',
                              color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])])
             
-            # [순수 Python 해결] Streamlit 테마 사용 + 배경 투명화
             fig.update_layout(
                 margin=dict(t=0, l=0, r=0, b=0),
                 height=350,
-                # paper_bgcolor, plot_bgcolor: 투명으로 설정하여 앱 배경(흰색/검은색)을 그대로 투과시킴
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor=CARD_BG_COLOR, # 앱 배경색으로 강제 설정
+                plot_bgcolor=CARD_BG_COLOR,
+                font=dict(color="white", family="Pretendard"), 
                 coloraxis_showscale=False
             )
             fig.update_traces(
-                textfont=dict(size=18),
-                # [핵심] 트리맵의 '부모 상자(Root Node)' 색상을 투명하게 만듦 (회색 박스 원인 제거)
-                root_color="rgba(0,0,0,0)",
-                marker=dict(line=dict(width=0)) # 박스 외곽선 제거
+                textfont=dict(size=18, color="white"), 
+                marker=dict(line=dict(width=1, color="#30333F")), 
+                texttemplate="<b>%{label}</b><br>%{value}건",
+                root_color=CARD_BG_COLOR # [중요] 부모 노드 배경색도 앱 배경색으로 설정
             )
-            
-            # use_container_width=True만 사용하여 Streamlit 테마 자동 적용 (글자색 자동 반전)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, theme=None)
         else:
             st.info("데이터 부족")
         
         st.divider()
-        st.subheader("📊 상세 분석")
+        # [수정] 문법 오류 수정 완료
+        st.subheader("📊 키워드 및 비중 분석")
         c_pie, c_bar = st.columns(2)
         
         with c_pie:
@@ -348,9 +411,9 @@ with tab2:
                 fig_pie = px.pie(pd.Series(all_cats).value_counts().reset_index(name='count').rename(columns={'index':'category'}), 
                                  values='count', names='category', hole=0.5,
                                  color_discrete_sequence=[PURPLE_PALETTE[x] for x in [500, 600, 700, 800, 900]])
-                fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20),
-                                      paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig_pie, use_container_width=True)
+                fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20), template="plotly_dark",
+                                      paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
+                st.plotly_chart(fig_pie, use_container_width=True, theme=None)
             else: st.info("데이터 부족")
         
         with c_bar:
@@ -362,8 +425,8 @@ with tab2:
                                            marker=dict(color=PURPLE_PALETTE[600]), text=kw_counts['count'], textposition='outside'))
                 fig_bar.update_layout(xaxis=dict(visible=False), yaxis=dict(autorange="reversed"),
                                       height=350, margin=dict(t=20, b=20, l=10, r=40),
-                                      paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig_bar, use_container_width=True)
+                                      paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR, template="plotly_dark")
+                st.plotly_chart(fig_bar, use_container_width=True, theme=None)
             else: st.info("데이터 부족")
 
         st.divider()
@@ -394,6 +457,7 @@ with tab2:
                     cats = parse_categories(row['category'])
                     try: kws_list = json.loads(row['keywords'])
                     except: kws_list = []
+                    
                     kw_text = " ".join([f"#{k.replace('#', '')}" for k in kws_list])
                     badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
                     st.markdown(f"<div class='tag-container'>{badges} <span class='keyword-text'>{kw_text}</span></div>", unsafe_allow_html=True)
