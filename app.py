@@ -12,16 +12,14 @@ from streamlit_gsheets import GSheetsConnection
 # -----------------------------------------------------------------------------
 # 1. 설정 및 기본 함수
 # -----------------------------------------------------------------------------
-# [필수] set_page_config는 코드의 가장 첫 줄에 와야 합니다.
 st.set_page_config(page_title="Team Lesson Learned", layout="wide")
 
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
-CARD_BG_COLOR = "#0E1117" # 앱 배경색 (Dark 고정)
 
 # 모델 우선순위
 MODEL_PRIORITY_LIST = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
 
-# [수정] 확장된 표준 카테고리
+# 표준 카테고리
 DEFAULT_CATEGORIES = [
     "기획/PM", "디자인/UX", "개발/구현", "QA/테스트", "데이터/AI",
     "비즈니스/전략", "마케팅/그로스", "운영/CS", "영업/제휴",
@@ -30,10 +28,11 @@ DEFAULT_CATEGORIES = [
     "기타"
 ]
 
+# 뱃지 색상 (라이트/다크 모드 모두에서 잘 보이는 보라색 계열)
 PURPLE_PALETTE = {
-    50: "#EEEFFF", 100: "#DFE1FF", 200: "#C6C7FF", 300: "#A3A3FE",
-    400: "#7E72FA", 500: "#7860F4", 600: "#6A43E8", 700: "#5B35CD",
-    800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
+    400: "#7E72FA", 
+    800: "#4A2EA5", 
+    900: "#3F2C83"
 }
 
 def get_connection():
@@ -141,23 +140,15 @@ def analyze_text(text):
     return ["#AI오류"], ["기타"], "None"
 
 # -----------------------------------------------------------------------------
-# 3. 주차 관련 함수 (★ 여기가 핵심 수정: 목요일 기준 계산)
+# 3. 주차 관련 함수 (목요일 기준)
 # -----------------------------------------------------------------------------
 def get_week_label_and_start(date_obj):
-    """1월 9일(금)과 1월 12일(월)을 정확히 다른 주차로 분리하기 위한 로직"""
     if pd.isna(date_obj): return None, None
     ts = pd.to_datetime(date_obj).normalize()
-    
-    # 해당 날짜가 포함된 주의 월요일 계산
     start_of_week = ts - datetime.timedelta(days=ts.weekday())
-    
-    # 해당 날짜가 포함된 주의 목요일 계산 (ISO 표준 유사 방식)
     thursday_of_week = start_of_week + datetime.timedelta(days=3)
-    
-    # 목요일을 기준으로 년/월/주차 확정
     week_num = (thursday_of_week.day - 1) // 7 + 1
     label = f"{thursday_of_week.year % 100}년 {thursday_of_week.month}월 {week_num}주차"
-    
     return label, start_of_week.normalize()
 
 def get_all_week_options(df):
@@ -194,19 +185,14 @@ def get_week_range(week_label):
         year = int(parts[0][:-1]) + 2000
         month = int(parts[1][:-1])
         week_num = int(parts[2][:-2])
-        
-        # 해당 주차의 목요일로 추정되는 날짜 계산
         first_day_of_month = datetime.date(year, month, 1)
         target_thursday = first_day_of_month + datetime.timedelta(days=(week_num - 1) * 7)
-        
-        # 그 목요일이 포함된 주의 월요일로 보정
         start = target_thursday - datetime.timedelta(days=target_thursday.weekday())
-        
         return pd.to_datetime(start).normalize(), pd.to_datetime(start + datetime.timedelta(days=6)).normalize()
     except: return get_week_range("이번 주 기록")
 
 # -----------------------------------------------------------------------------
-# 4. Streamlit UI
+# 4. Streamlit UI (테마 적용)
 # -----------------------------------------------------------------------------
 if 'edit_mode' not in st.session_state: st.session_state['edit_mode'] = False
 if 'edit_data' not in st.session_state: st.session_state['edit_data'] = {}
@@ -219,19 +205,37 @@ def confirm_delete_dialog(entry_id):
         delete_entry(entry_id); st.rerun()
     if c2.button("취소", use_container_width=True): st.rerun()
 
+# [수정] 강제 색상 제거 및 뱃지 스타일만 유지 (라이트/다크 모드 자동 호환)
 st.markdown(f"""
     <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
     * {{ font-family: 'Pretendard', sans-serif !important; }}
+    
     .appview-container .main .block-container {{ max-width: 1080px; margin: 0 auto; }}
-    div[data-testid="stMetric"] {{ background-color: {CARD_BG_COLOR}; border: 1px solid #30333F; padding: 15px; border-radius: 10px; }}
+    
+    /* 뱃지 스타일: 다크/라이트 모두에서 잘 보이도록 보라색 배경에 흰 글씨 유지 */
+    .cat-badge {{ 
+        background-color: {PURPLE_PALETTE[800]}; 
+        color: white; 
+        padding: 3px 6px; 
+        border-radius: 10px; 
+        font-size: 0.8rem; 
+        font-weight: 500; 
+        margin-right: 5px; 
+    }}
+    
+    /* 키워드: 연한 보라색으로 강조 */
+    .keyword-text {{ 
+        color: {PURPLE_PALETTE[400]}; 
+        font-size: 0.8rem; 
+        font-weight: 600; 
+    }}
+    
+    /* 마진 조정 */
     .tag-container {{ margin-top: 10px; margin-bottom: 20px; }}
-    hr {{ margin: 5px 0 5px 0; border-top: 1px solid #30333F; }}
     div[data-testid="stButton"] > button {{ padding-top: 4px; padding-bottom: 4px; font-size: 0.75rem; }}
-    .writer-name {{ font-weight: bold; font-size: 1.05rem; color: white; }}
-    .date-info {{ color: #9CA3AF; font-size: 0.9em; margin-left: 10px; }}
-    .cat-badge {{ background-color: {PURPLE_PALETTE[800]}; color: white; padding: 3px 6px; border-radius: 10px; font-size: 0.8rem; font-weight: 500; margin-right: 5px; }}
-    .keyword-text {{ color: {PURPLE_PALETTE[400]}; font-size: 0.8rem; font-weight: 500; }}
+    .writer-name {{ font-weight: bold; font-size: 1.05rem; }}
+    .date-info {{ color: gray; font-size: 0.9em; margin-left: 10px; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -359,22 +363,19 @@ with tab2:
             fig = px.treemap(cat_counts, path=['Category'], values='Value', color='Value',
                              color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])])
             
-            # [최종 해결] 템플릿 제거 및 배경색 '강제 주입'
+            # [수정] 배경색 강제 지정 제거 -> Streamlit 테마 자동 적용
             fig.update_layout(
                 margin=dict(t=0, l=0, r=0, b=0),
                 height=350,
-                paper_bgcolor=CARD_BG_COLOR, # 앱 배경색으로 강제 설정
-                plot_bgcolor=CARD_BG_COLOR,
-                font=dict(color="white", family="Pretendard"), 
                 coloraxis_showscale=False
             )
+            # 텍스트와 마커는 기본값 유지 (자동 테마)
             fig.update_traces(
-                textfont=dict(size=18, color="white"), 
-                marker=dict(line=dict(width=1, color="#30333F")), 
                 texttemplate="<b>%{label}</b><br>%{value}건",
-                root_color=CARD_BG_COLOR # [중요] 부모 노드 배경색도 앱 배경색으로 설정
+                textfont=dict(size=18)
             )
-            st.plotly_chart(fig, use_container_width=True, theme=None)
+            # theme=None을 사용하지 않음 (Streamlit Native Theme 사용)
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("데이터 부족")
         
@@ -388,9 +389,8 @@ with tab2:
                 fig_pie = px.pie(pd.Series(all_cats).value_counts().reset_index(name='count').rename(columns={'index':'category'}), 
                                  values='count', names='category', hole=0.5,
                                  color_discrete_sequence=[PURPLE_PALETTE[x] for x in [500, 600, 700, 800, 900]])
-                fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20), template="plotly_dark",
-                                      paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR)
-                st.plotly_chart(fig_pie, use_container_width=True, theme=None)
+                fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20))
+                st.plotly_chart(fig_pie, use_container_width=True)
             else: st.info("데이터 부족")
         
         with c_bar:
@@ -399,11 +399,10 @@ with tab2:
                 kw_counts = pd.Series(all_kws).value_counts().head(10).reset_index()
                 kw_counts.columns = ['keyword', 'count']
                 fig_bar = go.Figure(go.Bar(x=kw_counts['count'], y=kw_counts['keyword'], orientation='h',
-                                           marker=dict(color=PURPLE_PALETTE[600]), text=kw_counts['count'], textposition='outside'))
+                                           marker=dict(color=PURPLE_PALETTE[400]), text=kw_counts['count'], textposition='outside'))
                 fig_bar.update_layout(xaxis=dict(visible=False), yaxis=dict(autorange="reversed"),
-                                      height=350, margin=dict(t=20, b=20, l=10, r=40),
-                                      paper_bgcolor=CARD_BG_COLOR, plot_bgcolor=CARD_BG_COLOR, template="plotly_dark")
-                st.plotly_chart(fig_bar, use_container_width=True, theme=None)
+                                      height=350, margin=dict(t=20, b=20, l=10, r=40))
+                st.plotly_chart(fig_bar, use_container_width=True)
             else: st.info("데이터 부족")
 
         st.divider()
