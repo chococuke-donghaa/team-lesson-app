@@ -28,11 +28,11 @@ DEFAULT_CATEGORIES = [
     "기타"
 ]
 
-# 뱃지 색상 (라이트/다크 모드 모두에서 잘 보이는 보라색 계열)
+# [수정] 누락된 색상 코드를 모두 복구하여 KeyError 방지
 PURPLE_PALETTE = {
-    400: "#7E72FA", 
-    800: "#4A2EA5", 
-    900: "#3F2C83"
+    50: "#EEEFFF", 100: "#DFE1FF", 200: "#C6C7FF", 300: "#A3A3FE",
+    400: "#7E72FA", 500: "#7860F4", 600: "#6A43E8", 700: "#5B35CD",
+    800: "#4A2EA5", 900: "#3F2C83", 950: "#261A4C"
 }
 
 def get_connection():
@@ -192,7 +192,7 @@ def get_week_range(week_label):
     except: return get_week_range("이번 주 기록")
 
 # -----------------------------------------------------------------------------
-# 4. Streamlit UI (테마 적용)
+# 4. Streamlit UI (라이트/다크 모드 호환)
 # -----------------------------------------------------------------------------
 if 'edit_mode' not in st.session_state: st.session_state['edit_mode'] = False
 if 'edit_data' not in st.session_state: st.session_state['edit_data'] = {}
@@ -205,7 +205,6 @@ def confirm_delete_dialog(entry_id):
         delete_entry(entry_id); st.rerun()
     if c2.button("취소", use_container_width=True): st.rerun()
 
-# [수정] 강제 색상 제거 및 뱃지 스타일만 유지 (라이트/다크 모드 자동 호환)
 st.markdown(f"""
     <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
@@ -363,18 +362,16 @@ with tab2:
             fig = px.treemap(cat_counts, path=['Category'], values='Value', color='Value',
                              color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])])
             
-            # [수정] 배경색 강제 지정 제거 -> Streamlit 테마 자동 적용
+            # 배경색 지정 제거 -> Streamlit 테마 자동 적용
             fig.update_layout(
                 margin=dict(t=0, l=0, r=0, b=0),
                 height=350,
                 coloraxis_showscale=False
             )
-            # 텍스트와 마커는 기본값 유지 (자동 테마)
             fig.update_traces(
                 texttemplate="<b>%{label}</b><br>%{value}건",
                 textfont=dict(size=18)
             )
-            # theme=None을 사용하지 않음 (Streamlit Native Theme 사용)
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("데이터 부족")
@@ -386,6 +383,7 @@ with tab2:
         with c_pie:
             st.caption("Category Ratio")
             if all_cats:
+                # KeyError를 유발했던 색상 리스트 문제 해결
                 fig_pie = px.pie(pd.Series(all_cats).value_counts().reset_index(name='count').rename(columns={'index':'category'}), 
                                  values='count', names='category', hole=0.5,
                                  color_discrete_sequence=[PURPLE_PALETTE[x] for x in [500, 600, 700, 800, 900]])
