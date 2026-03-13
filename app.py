@@ -197,10 +197,12 @@ def get_week_range(week_label):
     except: return get_week_range("이번 주 기록")
 
 # -----------------------------------------------------------------------------
-# 4. Streamlit UI 
+# 4. Streamlit UI 및 State 관리
 # -----------------------------------------------------------------------------
 if 'edit_mode' not in st.session_state: st.session_state['edit_mode'] = False
 if 'edit_data' not in st.session_state: st.session_state['edit_data'] = {}
+# [추가] 차트 초기화 관리를 위한 고유 키 저장소
+if 'treemap_key' not in st.session_state: st.session_state['treemap_key'] = str(uuid.uuid4())
 
 @st.dialog("⚠️ 삭제 확인")
 def confirm_delete_dialog(entry_id):
@@ -402,66 +404,13 @@ with tab2:
                 textfont=dict(size=18)
             )
             
-            # [핵심] 사용자가 맵을 한 번 더 클릭하여 선택을 해제하면, selection['points']가 빈 리스트가 되면서 자연스럽게 필터가 풀림
             try:
+                # [핵심] 차트의 key를 세션에서 관리하여 언제든 초기화할 수 있게 함
                 chart_event = st.plotly_chart(
                     fig, 
                     use_container_width=True, 
                     on_select="rerun", 
-                    selection_mode="points"
+                    selection_mode="points",
+                    key=st.session_state['treemap_key']
                 )
-                if chart_event and "selection" in chart_event and "points" in chart_event["selection"] and len(chart_event["selection"]["points"]) > 0:
-                    map_selected_cat = chart_event["selection"]["points"][0]["label"]
-            except TypeError:
-                st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("데이터 부족")
-
-        st.divider()
-        st.subheader("🗂️ 전체 레슨런 목록 (카테고리 필터)")
-        
-        unique_categories = sorted(list(set(all_cats)))
-        cat_options = ["전체 보기"] + unique_categories
-        
-        col_list_filter, _ = st.columns([1, 3])
-        
-        # [수정] 버튼을 제거하고, 안내 문구만 토글 방식에 맞게 변경
-        if map_selected_cat and map_selected_cat in unique_categories:
-            st.info(f"👆 맵에서 **'{map_selected_cat}'** 카테고리가 선택되었습니다. (필터를 해제하려면 맵 상단의 헤더나 빈 곳을 한 번 더 클릭하세요)")
-            with col_list_filter:
-                selected_cat_filter = st.selectbox(
-                    "카테고리 선택", 
-                    cat_options, 
-                    index=cat_options.index(map_selected_cat), 
-                    disabled=True, 
-                    key="tab2_cat_filter_disabled"
-                )
-        else:
-            with col_list_filter:
-                selected_cat_filter = st.selectbox("카테고리 선택", cat_options, key="tab2_cat_filter")
-        
-        if selected_cat_filter == "전체 보기":
-            f_df_dash = df.copy()
-        else:
-            f_df_dash = df[df['category'].apply(lambda x: selected_cat_filter in parse_categories(x))]
-        
-        if not f_df_dash.empty:
-            f_df_dash = f_df_dash.sort_values(by="date", ascending=False)
-            st.caption(f"총 {len(f_df_dash)}건")
-            
-            for _, row in f_df_dash.iterrows():
-                with st.container(border=True):
-                    d_str = row['date'].strftime('%Y-%m-%d')
-                    st.markdown(f"<div class='info-block'><span class='writer-name'>{row['writer']}</span><span class='date-info'>{d_str}</span></div>", unsafe_allow_html=True)
-                    st.markdown("<hr>", unsafe_allow_html=True)
-                    st.markdown(row['text'])
-                    
-                    cats = parse_categories(row['category'])
-                    try: kws_list = json.loads(row['keywords'])
-                    except: kws_list = []
-                    
-                    kw_text = " ".join([f"#{k.replace('#', '')}" for k in kws_list])
-                    badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
-                    st.markdown(f"<div class='tag-container'>{badges} <span class='keyword-text'>{kw_text}</span></div>", unsafe_allow_html=True)
-        else:
-            st.info("해당 카테고리의 글이 없습니다.")
+                if chart_event and "selection" in chart_event and "points" in
