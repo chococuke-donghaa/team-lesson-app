@@ -413,4 +413,65 @@ with tab2:
                     selection_mode="points",
                     key=st.session_state['treemap_key']
                 )
-                if chart_event and "selection" in chart_event and "points" in
+                if chart_event and "selection" in chart_event and "points" in chart_event["selection"] and len(chart_event["selection"]["points"]) > 0:
+                    map_selected_cat = chart_event["selection"]["points"][0]["label"]
+            except TypeError:
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("데이터 부족")
+
+        st.divider()
+        st.subheader("🗂️ 전체 레슨런 목록 (카테고리 필터)")
+        
+        unique_categories = sorted(list(set(all_cats)))
+        cat_options = ["전체 보기"] + unique_categories
+        
+        col_list_filter, _ = st.columns([1, 3])
+        
+        # 맵 선택 여부에 따라 셀렉트박스의 기본값을 결정
+        default_idx = 0
+        if map_selected_cat and map_selected_cat in unique_categories:
+            default_idx = cat_options.index(map_selected_cat)
+            # 사용자가 더블 클릭 해제법을 알 수 있도록 안내 문구 추가
+            st.info(f"👆 맵에서 **'{map_selected_cat}'** 카테고리가 선택되었습니다. (필터를 해제하려면 차트를 **더블 클릭**하거나, 아래 선택창에서 **'전체 보기'**를 선택하세요)")
+
+        with col_list_filter:
+            # [핵심] disabled=True를 제거하여, 사용자가 직접 셀렉트박스를 '전체 보기'로 바꿀 수 있게 허용
+            selected_cat_filter = st.selectbox(
+                "카테고리 선택", 
+                cat_options, 
+                index=default_idx, 
+                key="tab2_cat_filter"
+            )
+        
+        # [핵심 로직] 맵에서 선택된 카테고리가 있는데, 사용자가 하단 셀렉트박스를 다른 것(예: '전체 보기')으로 변경했다면?
+        # -> 차트의 상태(Zoom/Select)를 강제로 초기화하기 위해 key 값을 바꿔버리고 화면을 재시작함.
+        if map_selected_cat and selected_cat_filter != map_selected_cat:
+            st.session_state['treemap_key'] = str(uuid.uuid4())
+            st.rerun()
+            
+        if selected_cat_filter == "전체 보기":
+            f_df_dash = df.copy()
+        else:
+            f_df_dash = df[df['category'].apply(lambda x: selected_cat_filter in parse_categories(x))]
+        
+        if not f_df_dash.empty:
+            f_df_dash = f_df_dash.sort_values(by="date", ascending=False)
+            st.caption(f"총 {len(f_df_dash)}건")
+            
+            for _, row in f_df_dash.iterrows():
+                with st.container(border=True):
+                    d_str = row['date'].strftime('%Y-%m-%d')
+                    st.markdown(f"<div class='info-block'><span class='writer-name'>{row['writer']}</span><span class='date-info'>{d_str}</span></div>", unsafe_allow_html=True)
+                    st.markdown("<hr>", unsafe_allow_html=True)
+                    st.markdown(row['text'])
+                    
+                    cats = parse_categories(row['category'])
+                    try: kws_list = json.loads(row['keywords'])
+                    except: kws_list = []
+                    
+                    kw_text = " ".join([f"#{k.replace('#', '')}" for k in kws_list])
+                    badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
+                    st.markdown(f"<div class='tag-container'>{badges} <span class='keyword-text'>{kw_text}</span></div>", unsafe_allow_html=True)
+        else:
+            st.info("해당 카테고리의 글이 없습니다.")
