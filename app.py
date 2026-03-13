@@ -197,12 +197,15 @@ def get_week_range(week_label):
     except: return get_week_range("이번 주 기록")
 
 # -----------------------------------------------------------------------------
-# 4. Streamlit UI 및 State 관리
+# 4. Streamlit UI 및 State 관리 (★ 완벽한 상태 연동 로직 추가)
 # -----------------------------------------------------------------------------
 if 'edit_mode' not in st.session_state: st.session_state['edit_mode'] = False
 if 'edit_data' not in st.session_state: st.session_state['edit_data'] = {}
-# [추가] 차트 초기화 관리를 위한 고유 키 저장소
+
+# 맵과 셀렉트박스의 상태 충돌을 막기 위한 전용 변수들
 if 'treemap_key' not in st.session_state: st.session_state['treemap_key'] = str(uuid.uuid4())
+if 'prev_map_cat' not in st.session_state: st.session_state['prev_map_cat'] = None
+if 'tab2_cat_filter' not in st.session_state: st.session_state['tab2_cat_filter'] = "전체 보기"
 
 @st.dialog("⚠️ 삭제 확인")
 def confirm_delete_dialog(entry_id):
@@ -347,6 +350,8 @@ with tab2:
         
         try: all_kws = [k for row in df['keywords'] for k in json.loads(row)]
         except: all_kws = []
+        
+        unique_categories = sorted(list(set(all_cats)))
 
         st.subheader("Key Metrics")
         k1, k2, k3, k4 = st.columns(4)
@@ -383,8 +388,9 @@ with tab2:
 
         st.divider()
         st.subheader("🗺️ Lesson Map (카테고리 비중)")
+        st.caption("💡 박스를 클릭하면 필터가 적용되고, 아래 목록에서 '전체 보기'를 누르면 해제됩니다.")
         
-        map_selected_cat = None
+        curr_map_cat = None
         
         if all_cats:
             cat_counts = pd.Series(all_cats).value_counts().reset_index()
@@ -405,7 +411,7 @@ with tab2:
             )
             
             try:
-                # [핵심] 차트의 key를 세션에서 관리하여 언제든 초기화할 수 있게 함
+                # 차트 그리기 & 선택 이벤트 캡처
                 chart_event = st.plotly_chart(
                     fig, 
                     use_container_width=True, 
@@ -413,43 +419,47 @@ with tab2:
                     selection_mode="points",
                     key=st.session_state['treemap_key']
                 )
-                if chart_event and "selection" in chart_event and "points" in chart_event["selection"] and len(chart_event["selection"]["points"]) > 0:
-                    map_selected_cat = chart_event["selection"]["points"][0]["label"]
+                if chart_event and "selection" in chart_event and len(chart_event["selection"].get("points", [])) > 0:
+                    curr_map_cat = chart_event["selection"]["points"][0]["label"]
             except TypeError:
                 st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("데이터 부족")
 
-        st.divider()
-        st.subheader("🗂️ 전체 레슨런 목록 (카테고리 필터)")
+        # =========================================================================
+        # ★ 핵심 로직: 맵 클릭과 셀렉트박스의 상태를 완벽하게 동기화 ★
+        # =========================================================================
         
-        unique_categories = sorted(list(set(all_cats)))
-        cat_options = ["전체 보기"] + unique_categories
+        # 1. 사용자가 맵을 새롭게 클릭했을 때 -> 셀렉트박스 변경
+        if curr_map_cat != st.session_state['prev_map_cat']:
+            st.session_state['prev_map_cat'] = curr_map_cat
+            if curr_map_cat in unique_categories:
+                st.session_state['tab2_cat_filter'] = curr_map_cat
+            else:
+                st.session_state['tab2_cat_filter'] = "전체 보기"
+            st.rerun()
+
+        st.divider()
+        st.subheader("🗂️ 전체 레슨런 목록")
         
         col_list_filter, _ = st.columns([1, 3])
-        
-        # 맵 선택 여부에 따라 셀렉트박스의 기본값을 결정
-        default_idx = 0
-        if map_selected_cat and map_selected_cat in unique_categories:
-            default_idx = cat_options.index(map_selected_cat)
-            # 사용자가 더블 클릭 해제법을 알 수 있도록 안내 문구 추가
-            st.info(f"👆 맵에서 **'{map_selected_cat}'** 카테고리가 선택되었습니다. (필터를 해제하려면 차트를 **더블 클릭**하거나, 아래 선택창에서 **'전체 보기'**를 선택하세요)")
-
         with col_list_filter:
-            # [핵심] disabled=True를 제거하여, 사용자가 직접 셀렉트박스를 '전체 보기'로 바꿀 수 있게 허용
+            # 셀렉트박스는 이제 세션 상태('tab2_cat_filter')를 기반으로 움직입니다.
             selected_cat_filter = st.selectbox(
-                "카테고리 선택", 
-                cat_options, 
-                index=default_idx, 
+                "카테고리 필터", 
+                ["전체 보기"] + unique_categories, 
                 key="tab2_cat_filter"
             )
         
-        # [핵심 로직] 맵에서 선택된 카테고리가 있는데, 사용자가 하단 셀렉트박스를 다른 것(예: '전체 보기')으로 변경했다면?
-        # -> 차트의 상태(Zoom/Select)를 강제로 초기화하기 위해 key 값을 바꿔버리고 화면을 재시작함.
-        if map_selected_cat and selected_cat_filter != map_selected_cat:
-            st.session_state['treemap_key'] = str(uuid.uuid4())
+        # 2. 사용자가 셀렉트박스를 수동으로 "전체 보기" 등으로 바꿨을 때 -> 맵 상태 강제 초기화
+        if curr_map_cat in unique_categories and selected_cat_filter != curr_map_cat:
+            st.session_state['treemap_key'] = str(uuid.uuid4()) # 차트 키를 바꿔서 선택(Zoom) 상태를 박살냄
+            st.session_state['prev_map_cat'] = None
             st.rerun()
-            
+
+        # =========================================================================
+
+        # 필터 적용된 목록 출력
         if selected_cat_filter == "전체 보기":
             f_df_dash = df.copy()
         else:
