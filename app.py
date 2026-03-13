@@ -137,7 +137,7 @@ def analyze_text(text):
     return ["#AI오류"], ["기타"], "None"
 
 # -----------------------------------------------------------------------------
-# 3. 주차 관련 함수 (★ 필터 정렬 버그 수정 완료)
+# 3. 주차 관련 함수
 # -----------------------------------------------------------------------------
 def get_week_label_and_start(date_obj):
     if pd.isna(date_obj): return None, None
@@ -162,7 +162,6 @@ def get_all_week_options(df):
     options.extend(week_labels)
     options = list(pd.unique(options))
     
-    # [수정] 연도, 월, 주차를 모두 파싱하여 튜플(Tuple) 형태로 반환하여 정확히 정렬되도록 수정
     def parse_sort(label):
         if '년' in label:
             parts = label.split()
@@ -172,7 +171,7 @@ def get_all_week_options(df):
                 week = int(parts[2][:-2])
                 return (year, month, week)
             except: pass
-        return (99, 99, 99) # '이번 주 기록'을 최상단에 두기 위한 값
+        return (99, 99, 99) 
     
     options.sort(key=parse_sort, reverse=True)
     return ["이번 주 기록"] + [o for o in options if o != current_week_label and o != "이번 주 기록"]
@@ -198,7 +197,7 @@ def get_week_range(week_label):
     except: return get_week_range("이번 주 기록")
 
 # -----------------------------------------------------------------------------
-# 4. Streamlit UI (라이트/다크 모드 호환)
+# 4. Streamlit UI 
 # -----------------------------------------------------------------------------
 if 'edit_mode' not in st.session_state: st.session_state['edit_mode'] = False
 if 'edit_data' not in st.session_state: st.session_state['edit_data'] = {}
@@ -354,28 +353,9 @@ with tab2:
         k3.metric("누적 키워드", f"{len(set(all_kws))}개")
         k4.metric("최다 작성자", df['writer'].mode()[0] if not df['writer'].empty else "-")
         
-        st.divider()
-        st.subheader("🗺️ Lesson Map (카테고리 비중)")
-        if all_cats:
-            cat_counts = pd.Series(all_cats).value_counts().reset_index()
-            cat_counts.columns = ['Category', 'Value']
-            
-            fig = px.treemap(cat_counts, path=['Category'], values='Value', color='Value',
-                             color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])])
-            
-            fig.update_layout(
-                margin=dict(t=0, l=0, r=0, b=0),
-                height=350,
-                coloraxis_showscale=False
-            )
-            fig.update_traces(
-                texttemplate="<b>%{label}</b><br>%{value}건",
-                textfont=dict(size=18)
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("데이터 부족")
-        
+        # ---------------------------------------------------------
+        # [수정] 키워드 및 비중 분석 (파이/바 차트)를 위로 올림
+        # ---------------------------------------------------------
         st.divider()
         st.subheader("📊 키워드 및 비중 분석")
         c_pie, c_bar = st.columns(2)
@@ -401,6 +381,31 @@ with tab2:
                                       height=350, margin=dict(t=20, b=20, l=10, r=40))
                 st.plotly_chart(fig_bar, use_container_width=True)
             else: st.info("데이터 부족")
+
+        # ---------------------------------------------------------
+        # [수정] Lesson Map (트리맵)을 아래로 내림
+        # ---------------------------------------------------------
+        st.divider()
+        st.subheader("🗺️ Lesson Map (카테고리 비중)")
+        if all_cats:
+            cat_counts = pd.Series(all_cats).value_counts().reset_index()
+            cat_counts.columns = ['Category', 'Value']
+            
+            fig = px.treemap(cat_counts, path=['Category'], values='Value', color='Value',
+                             color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])])
+            
+            fig.update_layout(
+                margin=dict(t=0, l=0, r=0, b=0),
+                height=350,
+                coloraxis_showscale=False
+            )
+            fig.update_traces(
+                texttemplate="<b>%{label}</b><br>%{value}건",
+                textfont=dict(size=18)
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("데이터 부족")
 
         st.divider()
         st.subheader("🗂️ 전체 레슨런 목록 (카테고리 필터)")
