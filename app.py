@@ -137,7 +137,7 @@ def analyze_text(text):
     return ["#AI오류"], ["기타"], "None"
 
 # -----------------------------------------------------------------------------
-# 3. 주차 관련 함수 (★ 완벽 역산 로직으로 수정됨)
+# 3. 주차 관련 함수 (★ 필터 정렬 버그 수정 완료)
 # -----------------------------------------------------------------------------
 def get_week_label_and_start(date_obj):
     if pd.isna(date_obj): return None, None
@@ -162,12 +162,17 @@ def get_all_week_options(df):
     options.extend(week_labels)
     options = list(pd.unique(options))
     
+    # [수정] 연도, 월, 주차를 모두 파싱하여 튜플(Tuple) 형태로 반환하여 정확히 정렬되도록 수정
     def parse_sort(label):
         if '년' in label:
             parts = label.split()
-            try: return datetime.date(2000 + int(parts[0][:-1]), int(parts[1][:-1]), 1)
+            try:
+                year = int(parts[0][:-1])
+                month = int(parts[1][:-1])
+                week = int(parts[2][:-2])
+                return (year, month, week)
             except: pass
-        return datetime.date(2100, 1, 1)
+        return (99, 99, 99) # '이번 주 기록'을 최상단에 두기 위한 값
     
     options.sort(key=parse_sort, reverse=True)
     return ["이번 주 기록"] + [o for o in options if o != current_week_label and o != "이번 주 기록"]
@@ -182,23 +187,15 @@ def get_week_range(week_label):
         year = int(parts[0][:-1]) + 2000
         month = int(parts[1][:-1])
         week_num = int(parts[2][:-2])
-        
-        # [수정] 월의 1일 구하기
         first_day_of_month = datetime.date(year, month, 1)
         
-        # [수정] 해당 월의 '첫 번째 목요일' 찾기 (0=월, 3=목)
         offset_to_thursday = (3 - first_day_of_month.weekday()) % 7
         first_thursday = first_day_of_month + datetime.timedelta(days=offset_to_thursday)
-        
-        # [수정] N주차의 목요일 찾기
         target_thursday = first_thursday + datetime.timedelta(days=(week_num - 1) * 7)
-        
-        # [수정] 해당 주의 월요일 찾기 (목요일에서 3일 전)
         start = target_thursday - datetime.timedelta(days=3)
         
         return pd.to_datetime(start).normalize(), pd.to_datetime(start + datetime.timedelta(days=6)).normalize()
-    except: 
-        return get_week_range("이번 주 기록")
+    except: return get_week_range("이번 주 기록")
 
 # -----------------------------------------------------------------------------
 # 4. Streamlit UI (라이트/다크 모드 호환)
