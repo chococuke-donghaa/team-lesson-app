@@ -353,9 +353,6 @@ with tab2:
         k3.metric("누적 키워드", f"{len(set(all_kws))}개")
         k4.metric("최다 작성자", df['writer'].mode()[0] if not df['writer'].empty else "-")
         
-        # ---------------------------------------------------------
-        # [수정] 키워드 및 비중 분석 (파이/바 차트)를 위로 올림
-        # ---------------------------------------------------------
         st.divider()
         st.subheader("📊 키워드 및 비중 분석")
         c_pie, c_bar = st.columns(2)
@@ -382,11 +379,11 @@ with tab2:
                 st.plotly_chart(fig_bar, use_container_width=True)
             else: st.info("데이터 부족")
 
-        # ---------------------------------------------------------
-        # [수정] Lesson Map (트리맵)을 아래로 내림
-        # ---------------------------------------------------------
         st.divider()
         st.subheader("🗺️ Lesson Map (카테고리 비중)")
+        
+        map_selected_cat = None
+        
         if all_cats:
             cat_counts = pd.Series(all_cats).value_counts().reset_index()
             cat_counts.columns = ['Category', 'Value']
@@ -397,13 +394,22 @@ with tab2:
             fig.update_layout(
                 margin=dict(t=0, l=0, r=0, b=0),
                 height=350,
-                coloraxis_showscale=False
+                coloraxis_showscale=False,
+                clickmode="event+select" # [핵심] 클릭 이벤트 활성화
             )
             fig.update_traces(
                 texttemplate="<b>%{label}</b><br>%{value}건",
                 textfont=dict(size=18)
             )
-            st.plotly_chart(fig, use_container_width=True)
+            
+            # [핵심] 클릭 시 on_select='rerun' 속성을 통해 선택된 데이터 캡처 (최신 Streamlit 지원 기능)
+            try:
+                chart_event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points")
+                if chart_event and "selection" in chart_event and "points" in chart_event["selection"] and len(chart_event["selection"]["points"]) > 0:
+                    map_selected_cat = chart_event["selection"]["points"][0]["label"]
+            except TypeError:
+                # 구버전 Streamlit 하위 호환
+                st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("데이터 부족")
 
@@ -411,10 +417,24 @@ with tab2:
         st.subheader("🗂️ 전체 레슨런 목록 (카테고리 필터)")
         
         unique_categories = sorted(list(set(all_cats)))
+        cat_options = ["전체 보기"] + unique_categories
         
         col_list_filter, _ = st.columns([1, 3])
-        with col_list_filter:
-            selected_cat_filter = st.selectbox("카테고리 선택", ["전체 보기"] + unique_categories, key="tab2_cat_filter")
+        
+        # [핵심] 맵에서 선택된 값이 있으면 해당 필터 고정 및 안내 문구 출력
+        if map_selected_cat and map_selected_cat in unique_categories:
+            st.info(f"👆 위 맵에서 **'{map_selected_cat}'** 카테고리를 클릭하여 리스트가 필터링되었습니다. (해제하려면 맵의 빈 공간을 클릭하세요)")
+            with col_list_filter:
+                selected_cat_filter = st.selectbox(
+                    "카테고리 선택", 
+                    cat_options, 
+                    index=cat_options.index(map_selected_cat), 
+                    disabled=True, 
+                    key="tab2_cat_filter_disabled"
+                )
+        else:
+            with col_list_filter:
+                selected_cat_filter = st.selectbox("카테고리 선택", cat_options, key="tab2_cat_filter")
         
         if selected_cat_filter == "전체 보기":
             f_df_dash = df.copy()
