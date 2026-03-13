@@ -36,10 +36,12 @@ PURPLE_PALETTE = {
 def get_connection():
     return st.connection("gsheets", type=GSheetsConnection)
 
-def load_data():
+# [최적화 1] 화면 로딩용(5초 캐시)과 데이터 저장용(캐시 없음)을 분리
+def load_data(cache_ttl=5):
     conn = get_connection()
     try:
-        df = conn.read(ttl=0) 
+        # 화면 클릭 시 과부하를 막기 위해 기본 5초 동안은 데이터를 재사용
+        df = conn.read(ttl=cache_ttl) 
         if df.empty:
             return pd.DataFrame(columns=["id", "date", "writer", "text", "keywords", "category"])
         
@@ -63,9 +65,11 @@ def save_data_to_sheet(df):
     if 'date' in save_df.columns:
         save_df['date'] = pd.to_datetime(save_df['date']).dt.strftime('%Y-%m-%d')
     conn.update(data=save_df)
+    # [최적화 2] 데이터가 변경되면 즉시 화면이 갱신되도록 전체 캐시 강제 삭제
+    st.cache_data.clear()
 
 def save_entry(entry_id, writer, text, keywords, categories, date_val):
-    df = load_data()
+    df = load_data(cache_ttl=0) # 저장할 때는 가장 최신 쌩데이터를 가져옴
     cat_str = json.dumps(categories if isinstance(categories, list) else [str(categories)], ensure_ascii=False)
     kw_str = json.dumps(keywords if isinstance(keywords, list) else [str(keywords)], ensure_ascii=False)
 
@@ -77,7 +81,7 @@ def save_entry(entry_id, writer, text, keywords, categories, date_val):
     save_data_to_sheet(df)
 
 def update_entry(entry_id, writer, text, keywords, categories, date_val):
-    df = load_data()
+    df = load_data(cache_ttl=0)
     idx = df[df['id'] == entry_id].index
     if not idx.empty:
         df.at[idx[0], 'writer'] = writer
@@ -88,7 +92,7 @@ def update_entry(entry_id, writer, text, keywords, categories, date_val):
         save_data_to_sheet(df)
 
 def delete_entry(entry_id):
-    df = load_data()
+    df = load_data(cache_ttl=0)
     df = df[df['id'] != entry_id]
     save_data_to_sheet(df)
 
@@ -203,7 +207,6 @@ def get_week_range(week_label):
 if 'edit_mode' not in st.session_state: st.session_state['edit_mode'] = False
 if 'edit_data' not in st.session_state: st.session_state['edit_data'] = {}
 
-# [핵심] 필터 양방향 동기화를 위한 세션 상태
 if 'treemap_key' not in st.session_state: st.session_state['treemap_key'] = str(uuid.uuid4())
 if 'prev_map_cat' not in st.session_state: st.session_state['prev_map_cat'] = None
 if 'tab2_cat_filter' not in st.session_state: st.session_state['tab2_cat_filter'] = "전체 보기"
@@ -247,11 +250,16 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 st.title("Team Lesson Learned 🚀")
+
+# =========================================================================
+# [최적화 3] 데이터 로딩을 탭 안에서 각각 하던 것을 맨 위로 올려 딱 1번만 수행!
+# =========================================================================
+with st.spinner("데이터를 불러오는 중입니다..."):
+    df = load_data(cache_ttl=5)
+
 tab1, tab2 = st.tabs(["📝 배움 기록하기", "📊 통합 대시보드"])
 
 with tab1:
-    df = load_data()
-    
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
         e_data = st.session_state['edit_data']
@@ -344,7 +352,6 @@ with tab1:
         st.info("기록이 없습니다.")
 
 with tab2:
-    df = load_data()
     if not df.empty:
         all_cats = []
         for c in df['category']: all_cats.extend(parse_categories(c))
@@ -389,7 +396,7 @@ with tab2:
 
         st.divider()
         st.subheader("🗺️ Lesson Map (카테고리 비중)")
-        st.caption("💡 박스를 클릭하면 필터가 적용됩니다. 해제하려면 차트 상단의 **'전체 보기'** 헤더를 누르세요.")
+        st.caption("💡 박스를 클릭하면 아래 목록이 필터링됩니다. 해제하려면 차트 상단의 **'전체 보기'** 헤더를 누르세요.")
         
         curr_map_cat = None
         
@@ -397,20 +404,18 @@ with tab2:
             cat_counts = pd.Series(all_cats).value_counts().reset_index()
             cat_counts.columns = ['Category', 'Value']
             
-            # [핵심] "전체 보기"라는 가상의 부모(Root) 노드를 추가하여 계층 구조를 만듭니다.
-            # 이렇게 하면 줌아웃을 위해 헤더(전체 보기)를 클릭했을 때, 그 값이 반환되어 필터를 풀 수 있습니다.
             cat_counts['Root'] = '전체 보기'
             
             fig = px.treemap(
                 cat_counts, 
-                path=['Root', 'Category'], # 계층 구조 적용
+                path=['Root', 'Category'], 
                 values='Value', 
                 color='Value',
                 color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])]
             )
             
             fig.update_layout(
-                margin=dict(t=30, l=0, r=0, b=0), # '전체 보기' 헤더가 보일 수 있도록 상단 여백 확보
+                margin=dict(t=30, l=0, r=0, b=0), 
                 height=350,
                 coloraxis_showscale=False,
                 clickmode="event+select" 
@@ -440,13 +445,10 @@ with tab2:
         # ★ 완벽한 양방향 동기화 로직 ★
         # =========================================================================
         
-        # 1. 맵에서 클릭 이벤트가 발생했을 때 (선택 or 헤더 클릭으로 줌아웃)
         if curr_map_cat != st.session_state['prev_map_cat']:
             st.session_state['prev_map_cat'] = curr_map_cat
-            # 만약 선택한 곳이 정상 카테고리면 해당 카테고리로 필터링
             if curr_map_cat in unique_categories:
                 st.session_state['tab2_cat_filter'] = curr_map_cat
-            # 만약 상단 헤더인 '전체 보기'를 누르거나 빈 공간을 눌렀다면 필터 해제
             else: 
                 st.session_state['tab2_cat_filter'] = "전체 보기"
             st.rerun()
@@ -456,16 +458,14 @@ with tab2:
         
         col_list_filter, _ = st.columns([1, 3])
         with col_list_filter:
-            # 2. 셀렉트박스는 세션 상태에 묶여있어 맵이 바뀌면 자동으로 바뀝니다.
             selected_cat_filter = st.selectbox(
                 "카테고리 선택", 
                 ["전체 보기"] + unique_categories, 
                 key="tab2_cat_filter"
             )
         
-        # 3. 사용자가 셀렉트박스를 수동으로 변경하여 맵과 상태가 달라졌을 때 -> 맵 강제 초기화
         if st.session_state['prev_map_cat'] is not None and selected_cat_filter != st.session_state['prev_map_cat']:
-            st.session_state['treemap_key'] = str(uuid.uuid4()) # 맵의 key를 바꿔 선택 상태 날림
+            st.session_state['treemap_key'] = str(uuid.uuid4()) 
             st.session_state['prev_map_cat'] = None
             st.rerun()
 
@@ -494,5 +494,5 @@ with tab2:
                     kw_text = " ".join([f"#{k.replace('#', '')}" for k in kws_list])
                     badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
                     st.markdown(f"<div class='tag-container'>{badges} <span class='keyword-text'>{kw_text}</span></div>", unsafe_allow_html=True)
-        else:
-            st.info("해당 카테고리의 글이 없습니다.")
+    else:
+        st.info("기록이 없습니다.")
