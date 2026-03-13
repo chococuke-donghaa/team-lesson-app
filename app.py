@@ -16,10 +16,8 @@ st.set_page_config(page_title="Team Lesson Learned", layout="wide")
 
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
 
-# 모델 우선순위
 MODEL_PRIORITY_LIST = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
 
-# 표준 카테고리
 DEFAULT_CATEGORIES = [
     "기획/PM", "디자인/UX", "개발/구현", "QA/테스트", "데이터/AI",
     "비즈니스/전략", "마케팅/그로스", "운영/CS", "영업/제휴",
@@ -28,7 +26,6 @@ DEFAULT_CATEGORIES = [
     "기타"
 ]
 
-# [수정] 누락된 색상 코드를 모두 복구하여 KeyError 방지
 PURPLE_PALETTE = {
     50: "#EEEFFF", 100: "#DFE1FF", 200: "#C6C7FF", 300: "#A3A3FE",
     400: "#7E72FA", 500: "#7860F4", 600: "#6A43E8", 700: "#5B35CD",
@@ -140,7 +137,7 @@ def analyze_text(text):
     return ["#AI오류"], ["기타"], "None"
 
 # -----------------------------------------------------------------------------
-# 3. 주차 관련 함수 (목요일 기준)
+# 3. 주차 관련 함수 (★ 완벽 역산 로직으로 수정됨)
 # -----------------------------------------------------------------------------
 def get_week_label_and_start(date_obj):
     if pd.isna(date_obj): return None, None
@@ -185,11 +182,23 @@ def get_week_range(week_label):
         year = int(parts[0][:-1]) + 2000
         month = int(parts[1][:-1])
         week_num = int(parts[2][:-2])
+        
+        # [수정] 월의 1일 구하기
         first_day_of_month = datetime.date(year, month, 1)
-        target_thursday = first_day_of_month + datetime.timedelta(days=(week_num - 1) * 7)
-        start = target_thursday - datetime.timedelta(days=target_thursday.weekday())
+        
+        # [수정] 해당 월의 '첫 번째 목요일' 찾기 (0=월, 3=목)
+        offset_to_thursday = (3 - first_day_of_month.weekday()) % 7
+        first_thursday = first_day_of_month + datetime.timedelta(days=offset_to_thursday)
+        
+        # [수정] N주차의 목요일 찾기
+        target_thursday = first_thursday + datetime.timedelta(days=(week_num - 1) * 7)
+        
+        # [수정] 해당 주의 월요일 찾기 (목요일에서 3일 전)
+        start = target_thursday - datetime.timedelta(days=3)
+        
         return pd.to_datetime(start).normalize(), pd.to_datetime(start + datetime.timedelta(days=6)).normalize()
-    except: return get_week_range("이번 주 기록")
+    except: 
+        return get_week_range("이번 주 기록")
 
 # -----------------------------------------------------------------------------
 # 4. Streamlit UI (라이트/다크 모드 호환)
@@ -212,7 +221,6 @@ st.markdown(f"""
     
     .appview-container .main .block-container {{ max-width: 1080px; margin: 0 auto; }}
     
-    /* 뱃지 스타일: 다크/라이트 모두에서 잘 보이도록 보라색 배경에 흰 글씨 유지 */
     .cat-badge {{ 
         background-color: {PURPLE_PALETTE[800]}; 
         color: white; 
@@ -223,14 +231,12 @@ st.markdown(f"""
         margin-right: 5px; 
     }}
     
-    /* 키워드: 연한 보라색으로 강조 */
     .keyword-text {{ 
         color: {PURPLE_PALETTE[400]}; 
         font-size: 0.8rem; 
         font-weight: 600; 
     }}
     
-    /* 마진 조정 */
     .tag-container {{ margin-top: 10px; margin-bottom: 20px; }}
     div[data-testid="stButton"] > button {{ padding-top: 4px; padding-bottom: 4px; font-size: 0.75rem; }}
     .writer-name {{ font-weight: bold; font-size: 1.05rem; }}
@@ -244,7 +250,6 @@ tab1, tab2 = st.tabs(["📝 배움 기록하기", "📊 통합 대시보드"])
 with tab1:
     df = load_data()
     
-    # --- 수정 모드 ---
     if st.session_state['edit_mode']:
         st.subheader("✏️ 기록 수정하기")
         e_data = st.session_state['edit_data']
@@ -275,7 +280,6 @@ with tab1:
             st.session_state['edit_data'] = {}
             st.rerun()
 
-    # --- 일반 입력 모드 ---
     else:
         st.subheader("이번주의 레슨런을 기록해주세요")
         with st.form("record_form", clear_on_submit=True):
@@ -362,7 +366,6 @@ with tab2:
             fig = px.treemap(cat_counts, path=['Category'], values='Value', color='Value',
                              color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])])
             
-            # 배경색 지정 제거 -> Streamlit 테마 자동 적용
             fig.update_layout(
                 margin=dict(t=0, l=0, r=0, b=0),
                 height=350,
@@ -383,7 +386,6 @@ with tab2:
         with c_pie:
             st.caption("Category Ratio")
             if all_cats:
-                # KeyError를 유발했던 색상 리스트 문제 해결
                 fig_pie = px.pie(pd.Series(all_cats).value_counts().reset_index(name='count').rename(columns={'index':'category'}), 
                                  values='count', names='category', hole=0.5,
                                  color_discrete_sequence=[PURPLE_PALETTE[x] for x in [500, 600, 700, 800, 900]])
