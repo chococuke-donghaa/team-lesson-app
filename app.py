@@ -15,6 +15,7 @@ from streamlit_gsheets import GSheetsConnection
 st.set_page_config(page_title="Team Lesson Learned", layout="wide")
 
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else "YOUR_API_KEY"
+CARD_BG_COLOR = "#0E1117" 
 
 MODEL_PRIORITY_LIST = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
 
@@ -197,12 +198,12 @@ def get_week_range(week_label):
     except: return get_week_range("이번 주 기록")
 
 # -----------------------------------------------------------------------------
-# 4. Streamlit UI 및 State 관리 (★ 완벽한 상태 연동 로직 추가)
+# 4. Streamlit UI & State 관리
 # -----------------------------------------------------------------------------
 if 'edit_mode' not in st.session_state: st.session_state['edit_mode'] = False
 if 'edit_data' not in st.session_state: st.session_state['edit_data'] = {}
 
-# 맵과 셀렉트박스의 상태 충돌을 막기 위한 전용 변수들
+# [핵심] 필터 양방향 동기화를 위한 세션 상태
 if 'treemap_key' not in st.session_state: st.session_state['treemap_key'] = str(uuid.uuid4())
 if 'prev_map_cat' not in st.session_state: st.session_state['prev_map_cat'] = None
 if 'tab2_cat_filter' not in st.session_state: st.session_state['tab2_cat_filter'] = "전체 보기"
@@ -388,7 +389,7 @@ with tab2:
 
         st.divider()
         st.subheader("🗺️ Lesson Map (카테고리 비중)")
-        st.caption("💡 박스를 클릭하면 필터가 적용되고, 아래 목록에서 '전체 보기'를 누르면 해제됩니다.")
+        st.caption("💡 박스를 클릭하면 필터가 적용됩니다. 해제하려면 차트 상단의 **'전체 보기'** 헤더를 누르세요.")
         
         curr_map_cat = None
         
@@ -396,22 +397,31 @@ with tab2:
             cat_counts = pd.Series(all_cats).value_counts().reset_index()
             cat_counts.columns = ['Category', 'Value']
             
-            fig = px.treemap(cat_counts, path=['Category'], values='Value', color='Value',
-                             color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])])
+            # [핵심] "전체 보기"라는 가상의 부모(Root) 노드를 추가하여 계층 구조를 만듭니다.
+            # 이렇게 하면 줌아웃을 위해 헤더(전체 보기)를 클릭했을 때, 그 값이 반환되어 필터를 풀 수 있습니다.
+            cat_counts['Root'] = '전체 보기'
+            
+            fig = px.treemap(
+                cat_counts, 
+                path=['Root', 'Category'], # 계층 구조 적용
+                values='Value', 
+                color='Value',
+                color_continuous_scale=[(0, PURPLE_PALETTE[400]), (1, PURPLE_PALETTE[900])]
+            )
             
             fig.update_layout(
-                margin=dict(t=0, l=0, r=0, b=0),
+                margin=dict(t=30, l=0, r=0, b=0), # '전체 보기' 헤더가 보일 수 있도록 상단 여백 확보
                 height=350,
                 coloraxis_showscale=False,
                 clickmode="event+select" 
             )
             fig.update_traces(
                 texttemplate="<b>%{label}</b><br>%{value}건",
-                textfont=dict(size=18)
+                textfont=dict(size=18),
+                root_color=CARD_BG_COLOR
             )
             
             try:
-                # 차트 그리기 & 선택 이벤트 캡처
                 chart_event = st.plotly_chart(
                     fig, 
                     use_container_width=True, 
@@ -427,39 +437,40 @@ with tab2:
             st.info("데이터 부족")
 
         # =========================================================================
-        # ★ 핵심 로직: 맵 클릭과 셀렉트박스의 상태를 완벽하게 동기화 ★
+        # ★ 완벽한 양방향 동기화 로직 ★
         # =========================================================================
         
-        # 1. 사용자가 맵을 새롭게 클릭했을 때 -> 셀렉트박스 변경
+        # 1. 맵에서 클릭 이벤트가 발생했을 때 (선택 or 헤더 클릭으로 줌아웃)
         if curr_map_cat != st.session_state['prev_map_cat']:
             st.session_state['prev_map_cat'] = curr_map_cat
+            # 만약 선택한 곳이 정상 카테고리면 해당 카테고리로 필터링
             if curr_map_cat in unique_categories:
                 st.session_state['tab2_cat_filter'] = curr_map_cat
-            else:
+            # 만약 상단 헤더인 '전체 보기'를 누르거나 빈 공간을 눌렀다면 필터 해제
+            else: 
                 st.session_state['tab2_cat_filter'] = "전체 보기"
             st.rerun()
 
         st.divider()
-        st.subheader("🗂️ 전체 레슨런 목록")
+        st.subheader("🗂️ 전체 레슨런 목록 (카테고리 필터)")
         
         col_list_filter, _ = st.columns([1, 3])
         with col_list_filter:
-            # 셀렉트박스는 이제 세션 상태('tab2_cat_filter')를 기반으로 움직입니다.
+            # 2. 셀렉트박스는 세션 상태에 묶여있어 맵이 바뀌면 자동으로 바뀝니다.
             selected_cat_filter = st.selectbox(
-                "카테고리 필터", 
+                "카테고리 선택", 
                 ["전체 보기"] + unique_categories, 
                 key="tab2_cat_filter"
             )
         
-        # 2. 사용자가 셀렉트박스를 수동으로 "전체 보기" 등으로 바꿨을 때 -> 맵 상태 강제 초기화
-        if curr_map_cat in unique_categories and selected_cat_filter != curr_map_cat:
-            st.session_state['treemap_key'] = str(uuid.uuid4()) # 차트 키를 바꿔서 선택(Zoom) 상태를 박살냄
+        # 3. 사용자가 셀렉트박스를 수동으로 변경하여 맵과 상태가 달라졌을 때 -> 맵 강제 초기화
+        if st.session_state['prev_map_cat'] is not None and selected_cat_filter != st.session_state['prev_map_cat']:
+            st.session_state['treemap_key'] = str(uuid.uuid4()) # 맵의 key를 바꿔 선택 상태 날림
             st.session_state['prev_map_cat'] = None
             st.rerun()
 
         # =========================================================================
 
-        # 필터 적용된 목록 출력
         if selected_cat_filter == "전체 보기":
             f_df_dash = df.copy()
         else:
