@@ -373,7 +373,6 @@ with tab2:
                                  values='count', names='category', hole=0.5,
                                  color_discrete_sequence=[PURPLE_PALETTE[x] for x in [500, 600, 700, 800, 900]])
                 
-                # [수정] 파이차트의 Hover 툴팁 포맷 깔끔하게 변경 ("카테고리명 \n N건")
                 fig_pie.update_traces(
                     hovertemplate="<b>%{label}</b><br>%{value}건<extra></extra>"
                 )
@@ -390,7 +389,6 @@ with tab2:
                 fig_bar = go.Figure(go.Bar(x=kw_counts['count'], y=kw_counts['keyword'], orientation='h',
                                            marker=dict(color=PURPLE_PALETTE[400]), text=kw_counts['count'], textposition='outside'))
                 
-                # [수정] 바차트의 Hover 툴팁 포맷 깔끔하게 변경 ("키워드 \n N건")
                 fig_bar.update_traces(
                     hovertemplate="<b>%{y}</b><br>%{x}건<extra></extra>"
                 )
@@ -426,8 +424,10 @@ with tab2:
                 coloraxis_showscale=False,
                 clickmode="event+select" 
             )
+            # [수정] 트리맵 툴팁 포맷 깔끔하게 변경 ("카테고리명 \n N건")
             fig.update_traces(
                 texttemplate="<b>%{label}</b><br>%{value}건",
+                hovertemplate="<b>%{label}</b><br>%{value}건<extra></extra>",
                 textfont=dict(size=18),
                 root_color=CARD_BG_COLOR
             )
@@ -447,8 +447,6 @@ with tab2:
         else:
             st.info("데이터 부족")
 
-        # =========================================================================
-        # ★ 양방향 동기화 로직 ★
         # =========================================================================
         
         if curr_map_cat != st.session_state['prev_map_cat']:
