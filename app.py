@@ -36,11 +36,9 @@ PURPLE_PALETTE = {
 def get_connection():
     return st.connection("gsheets", type=GSheetsConnection)
 
-# [최적화 1] 화면 로딩용(5초 캐시)과 데이터 저장용(캐시 없음)을 분리
 def load_data(cache_ttl=5):
     conn = get_connection()
     try:
-        # 화면 클릭 시 과부하를 막기 위해 기본 5초 동안은 데이터를 재사용
         df = conn.read(ttl=cache_ttl) 
         if df.empty:
             return pd.DataFrame(columns=["id", "date", "writer", "text", "keywords", "category"])
@@ -65,11 +63,10 @@ def save_data_to_sheet(df):
     if 'date' in save_df.columns:
         save_df['date'] = pd.to_datetime(save_df['date']).dt.strftime('%Y-%m-%d')
     conn.update(data=save_df)
-    # [최적화 2] 데이터가 변경되면 즉시 화면이 갱신되도록 전체 캐시 강제 삭제
     st.cache_data.clear()
 
 def save_entry(entry_id, writer, text, keywords, categories, date_val):
-    df = load_data(cache_ttl=0) # 저장할 때는 가장 최신 쌩데이터를 가져옴
+    df = load_data(cache_ttl=0) 
     cat_str = json.dumps(categories if isinstance(categories, list) else [str(categories)], ensure_ascii=False)
     kw_str = json.dumps(keywords if isinstance(keywords, list) else [str(keywords)], ensure_ascii=False)
 
@@ -251,9 +248,6 @@ st.markdown(f"""
 
 st.title("Team Lesson Learned 🚀")
 
-# =========================================================================
-# [최적화 3] 데이터 로딩을 탭 안에서 각각 하던 것을 맨 위로 올려 딱 1번만 수행!
-# =========================================================================
 with st.spinner("데이터를 불러오는 중입니다..."):
     df = load_data(cache_ttl=5)
 
@@ -378,6 +372,12 @@ with tab2:
                 fig_pie = px.pie(pd.Series(all_cats).value_counts().reset_index(name='count').rename(columns={'index':'category'}), 
                                  values='count', names='category', hole=0.5,
                                  color_discrete_sequence=[PURPLE_PALETTE[x] for x in [500, 600, 700, 800, 900]])
+                
+                # [수정] 파이차트의 Hover 툴팁 포맷 깔끔하게 변경 ("카테고리명 \n N건")
+                fig_pie.update_traces(
+                    hovertemplate="<b>%{label}</b><br>%{value}건<extra></extra>"
+                )
+                
                 fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20))
                 st.plotly_chart(fig_pie, use_container_width=True)
             else: st.info("데이터 부족")
@@ -389,6 +389,12 @@ with tab2:
                 kw_counts.columns = ['keyword', 'count']
                 fig_bar = go.Figure(go.Bar(x=kw_counts['count'], y=kw_counts['keyword'], orientation='h',
                                            marker=dict(color=PURPLE_PALETTE[400]), text=kw_counts['count'], textposition='outside'))
+                
+                # [수정] 바차트의 Hover 툴팁 포맷 깔끔하게 변경 ("키워드 \n N건")
+                fig_bar.update_traces(
+                    hovertemplate="<b>%{y}</b><br>%{x}건<extra></extra>"
+                )
+                
                 fig_bar.update_layout(xaxis=dict(visible=False), yaxis=dict(autorange="reversed"),
                                       height=350, margin=dict(t=20, b=20, l=10, r=40))
                 st.plotly_chart(fig_bar, use_container_width=True)
@@ -442,7 +448,7 @@ with tab2:
             st.info("데이터 부족")
 
         # =========================================================================
-        # ★ 완벽한 양방향 동기화 로직 ★
+        # ★ 양방향 동기화 로직 ★
         # =========================================================================
         
         if curr_map_cat != st.session_state['prev_map_cat']:
@@ -494,5 +500,5 @@ with tab2:
                     kw_text = " ".join([f"#{k.replace('#', '')}" for k in kws_list])
                     badges = "".join([f'<span class="cat-badge">{c}</span>' for c in cats])
                     st.markdown(f"<div class='tag-container'>{badges} <span class='keyword-text'>{kw_text}</span></div>", unsafe_allow_html=True)
-    else:
-        st.info("기록이 없습니다.")
+        else:
+            st.info("해당 카테고리의 글이 없습니다.")
